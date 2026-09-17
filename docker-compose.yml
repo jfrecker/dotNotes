@@ -1,0 +1,55 @@
+services:
+  dotnotes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dotnotes
+    restart: unless-stopped
+    ports:
+      # host:container - override HOST_PORT in a .env file if 5175 is
+      # already taken on your machine (see .env.example), e.g.
+      # HOST_PORT=8080. Defaults to 5175 with no .env file at all.
+      - "${HOST_PORT:-5175}:5175"
+    environment:
+      # Overridable via ASP.NET Core's double-underscore convention
+      # (docs/02-ARCHITECTURE.md's Configuration section). The image
+      # already defaults Vault__RootPath to /data/vault (matching the
+      # bind mount below), so it's only listed here to make it obvious
+      # how to point it elsewhere if you ever change the mount target.
+      Vault__RootPath: /data/vault
+      Server__Port: "5175"
+      Sharing__Enabled: "${SHARING_ENABLED:-true}"
+      Mcp__Enabled: "${MCP_ENABLED:-true}"
+      # uid/gid the container's dotnet process runs as - defaults to the
+      # image's built-in "app" user (1654:1654) with no .env file. Set
+      # PUID/PGID in a .env file (see .env.example) to your own host
+      # user's `id -u`/`id -g` so files the container writes into the
+      # vault are owned by *you* - matters for editing notes directly,
+      # `git init`-ing the vault for backups, or just being able to
+      # `rm -rf` it yourself without sudo. See docker-entrypoint.sh for
+      # the full story.
+      PUID: "${PUID:-1654}"
+      PGID: "${PGID:-1654}"
+    volumes:
+      # Bind mount (not a named volume): for a single-user personal
+      # vault, being able to find, browse, and back up the notes
+      # directly on the host filesystem (e.g. from Windows Explorer via
+      # \\wsl$\... when running under WSL2, or any Linux backup tool
+      # on a bare-metal host) matters more than volume portability. The
+      # trade-off is host-path/permission coupling that a named volume
+      # would avoid, but that's the wrong trade-off for "my notes are
+      # just files I own" (see docs/02-ARCHITECTURE.md). See
+      # DEPLOYMENT.md for exactly where ./vault resolves to on the
+      # Windows-visible filesystem under WSL2. Override VAULT_PATH in a
+      # .env file (see .env.example) to point at a different host-side
+      # location without editing this file.
+      #
+      # ./vault is created on first run if it doesn't exist - nothing
+      # to create by hand before `docker compose up -d`.
+      - ${VAULT_PATH:-./vault}:/data/vault
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5175 && printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q 200"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3

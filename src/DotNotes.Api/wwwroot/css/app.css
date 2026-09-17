@@ -1,0 +1,1496 @@
+/* Small hand-written styles layered on top of the precompiled Tailwind
+   output (lib/tailwind/output.css). Kept deliberately minimal - this is a
+   personal tool, not a themeable product.
+
+   Note: we don't use the @tailwindcss/typography plugin here (it would
+   need to be vendored/verified against the standalone CLI build); the
+   rendered-preview typography below is hand-rolled instead. */
+
+#editor:disabled {
+  background-color: #f8fafc;
+  color: #94a3b8;
+}
+
+/* --- rendered markdown preview ------------------------------------- */
+
+.note-preview {
+  line-height: 1.65;
+}
+
+.note-preview > *:first-child {
+  margin-top: 0;
+}
+
+.note-preview h1,
+.note-preview h2,
+.note-preview h3,
+.note-preview h4,
+.note-preview h5,
+.note-preview h6 {
+  font-weight: 600;
+  color: #1e293b;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+}
+
+.note-preview h1 { font-size: 1.75rem; }
+.note-preview h2 { font-size: 1.4rem; }
+.note-preview h3 { font-size: 1.2rem; }
+.note-preview h4 { font-size: 1.05rem; }
+
+.note-preview p {
+  margin-top: 0.6em;
+  margin-bottom: 0.6em;
+}
+
+.note-preview a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+/* [[wikilinks]] - see js/markdown.js's marked extension and
+   js/wikilinks.js's resolution cache. Missing (not-yet-created) targets
+   get a dashed underline and a muted amber color so they read as "click
+   to create" rather than a normal navigable link. */
+.note-preview a.wikilink {
+  text-decoration-style: solid;
+}
+
+.note-preview a.wikilink.wikilink-missing {
+  color: #b45309;
+  text-decoration-style: dashed;
+}
+
+.note-preview ul,
+.note-preview ol {
+  margin-top: 0.4em;
+  margin-bottom: 0.4em;
+  padding-left: 1.5em;
+}
+
+.note-preview ul {
+  list-style: disc;
+}
+
+.note-preview ol {
+  list-style: decimal;
+}
+
+.note-preview li {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
+}
+
+/* Task-list items (checkboxes) shouldn't show a bullet as well. */
+.note-preview li:has(> input.task-checkbox) {
+  list-style: none;
+  margin-left: -1.5em;
+}
+
+.note-preview input.task-checkbox {
+  margin-right: 0.4em;
+  cursor: pointer;
+}
+
+.note-preview blockquote {
+  margin: 0.6em 0;
+  padding: 0.25em 1em;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+}
+
+.note-preview pre {
+  margin: 0.8em 0;
+  padding: 0.75em 1em;
+  border-radius: 0.375rem;
+  background-color: #f8fafc;
+  overflow-x: auto;
+}
+
+.note-preview pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
+.note-preview code:not(pre code) {
+  background-color: #f1f5f9;
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+.note-preview table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+}
+
+.note-preview th,
+.note-preview td {
+  border: 1px solid #cbd5e1;
+  padding: 0.35em 0.7em;
+}
+
+.note-preview th {
+  background-color: #f1f5f9;
+}
+
+.note-preview hr {
+  border: none;
+  border-top: 1px solid #cbd5e1;
+  margin: 1.2em 0;
+}
+
+.note-preview img {
+  max-width: 100%;
+}
+
+/* mermaid diagrams render as inline SVG inside pre.mermaid; undo the
+   generic <pre> box styling above so diagrams aren't boxed in a code
+   background. */
+.note-preview pre.mermaid {
+  background: transparent;
+  padding: 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+/* --- search box + results dropdown (js/search.js) --------------------
+   Hand-rolled rather than composed from Tailwind utilities: lib/tailwind
+   /output.css is a purged/precompiled build containing only the classes
+   already used elsewhere in wwwroot's HTML (see this file's top-of-file
+   note), so a bespoke widget like this dropdown - absolute positioning,
+   shadow, per-item dividers - is written by hand here, same treatment as
+   .note-preview and .graph-legend-dot below. */
+
+.search-input {
+  width: 18rem; /* matches the file-tree sidebar's Tailwind w-72 */
+  padding: 0.3rem 0.65rem;
+  font-size: 0.875rem;
+  color: #1e293b;
+  background-color: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0.35rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  background-color: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+  z-index: 30;
+}
+
+.search-result {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-top: 1px solid #e2e8f0;
+  cursor: pointer;
+}
+
+.search-result:first-child {
+  border-top: none;
+}
+
+.search-result:hover {
+  background-color: #f1f5f9;
+}
+
+.search-result-title {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.875rem;
+}
+
+.search-result-path {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.search-result-snippet {
+  color: #475569;
+  font-size: 0.8125rem;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+
+.search-empty {
+  padding: 0.75rem;
+  color: #94a3b8;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* --- sidebar chrome (index.html - "FILES" header, "Folders & Notes" sub-
+   header, "+New" button, small icon buttons) - structure follows
+   NoteDiscovery's reference screenshots (docs/01-PROJECT-PLAN.md's Phase
+   10; assets/screenshot_notediscovery.png, gitignored local reference),
+   colors stay on this file's theme variables rather than NoteDiscovery's
+   navy/yellow palette. */
+
+.sidebar-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.sidebar-subheader {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--color-text-faint);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.new-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--color-accent);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.new-menu-btn:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-text-faint);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--color-text-strong);
+  background-color: var(--color-hover-surface);
+}
+
+/* Sort-toggle button's "A↓"/"Z↓" label (js/app.js's updateSortToggleLabel) -
+   text inside an otherwise icon-sized .icon-btn. */
+#sort-toggle-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+/* "Drag=Move" hint / vault-root drop zone (js/tree.js's wireRootDropZone) -
+   matches the live NoteDiscovery demo, where this exact element (not the
+   general tree background or a header) is what accepts a drop to move an
+   item to the vault root. */
+
+.tree-root-drop-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin: 0.5rem 0.5rem 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--color-text-faintest);
+  border: 1px dashed transparent;
+  border-radius: 0.375rem;
+}
+
+/* Present for the whole duration of *any* drag (not just while hovering
+   this specific element) so it reads as "a valid target," matching the
+   live NoteDiscovery demo's own two-tier feedback (dim border for any
+   active drag, solid highlight only once actually hovered - see the
+   `-over` variant below). */
+.tree-root-drop-hint-armed {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+}
+
+.tree-root-drop-hint-over {
+  color: var(--color-accent);
+  background-color: var(--color-accent-surface);
+  border-color: var(--color-accent);
+}
+
+/* --- file-tree rows: drag-and-drop feedback (js/tree.js) ---------------
+   Each row already carries Tailwind utility classes for its base
+   layout/coloring/hover/selection (kept as-is, including for the selected
+   -row bg-blue-100/text-blue-800 combo, so the dark-theme overrides for
+   those classes elsewhere in this file keep applying unchanged). These
+   rules add what the precompiled build has no classes for: a flex row
+   that fits a truncating label (file rows had no flex layout at all
+   before this), reduced opacity on the row currently being dragged, and a
+   themed highlight on a folder row while something's dragged over it. */
+
+.tree-row {
+  display: flex;
+  align-items: center;
+}
+
+.tree-row-label {
+  flex: 1 1 auto;
+  min-width: 0; /* lets `truncate` actually ellipsize inside a flex row */
+}
+
+.tree-row-dragging {
+  opacity: 0.5;
+}
+
+/* `.tree-row.tree-row-drop-target` (two classes), not `!important`: a
+   folder row also carries `hover:bg-slate-100` (compiles to a
+   `.hover\:bg-slate-100:hover` selector - same specificity weight as two
+   plain classes) which could otherwise win while the mouse is over a
+   drop-armed row during a drag - same fix pattern as
+   .share-modal-overlay:not(.hidden) above. */
+.tree-row.tree-row-drop-target {
+  background-color: var(--color-accent-surface);
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Drag-to-reorder-among-siblings insertion markers (js/tree.js's
+   "drop between" zone, docs/03-FEATURE-SPEC.md's "Sidebar folder reorder")
+   - a thin accent-colored line above/below the row being dragged over,
+   distinct from the dashed-outline "drop onto to reparent" feedback above
+   so the two drop behaviors read as visually different actions. */
+.tree-row.tree-row-reorder-before {
+  box-shadow: inset 0 2px 0 0 var(--color-accent);
+}
+
+.tree-row.tree-row-reorder-after {
+  box-shadow: inset 0 -2px 0 0 var(--color-accent);
+}
+
+/* Rows are focusable (docs/03-FEATURE-SPEC.md's keyboard-accessibility
+   requirement for the drag-and-drop fallback) - a visible focus ring
+   matters more here than browser-default outline styling, since these are
+   plain `<div>`s, not natively-focusable elements. */
+.tree-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* --- generic popup menu (js/menu.js) - the "+New" dropdown, the tree
+   row's right-click/keyboard context menu, and its "Move to..." folder
+   picker all share this one widget. Hand-rolled for the same reason as
+   .search-dropdown/.share-modal above: no bespoke-menu classes exist in
+   the precompiled Tailwind build. */
+
+.app-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 11rem;
+  max-width: 16rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.3rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+}
+
+.app-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+  color: var(--color-text-secondary);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.app-menu-item:hover:not(:disabled) {
+  background-color: var(--color-hover-surface);
+}
+
+.app-menu-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.app-menu-item:disabled {
+  color: var(--color-text-faintest);
+  cursor: not-allowed;
+}
+
+.app-menu-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+}
+
+.app-menu-item:disabled .app-menu-item-icon {
+  color: var(--color-text-faintest);
+}
+
+.app-menu-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-menu-separator {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background-color: var(--color-border-subtle);
+}
+
+/* --- small themed modal (rename) ----------------------------------------
+   A smaller, single-input sibling of .share-modal below - same overlay
+   pattern, kept as its own class family since it needs no QR/copy-link
+   chrome and is reused for a single text field + two actions. */
+
+.mini-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-color: rgba(15, 23, 42, 0.4);
+}
+
+.mini-modal-overlay:not(.hidden) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-modal {
+  width: 22rem;
+  max-width: calc(100vw - 2rem);
+  background-color: var(--color-surface);
+  border-radius: 0.5rem;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+  padding: 1.25rem;
+}
+
+.mini-modal-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  margin-bottom: 0.4rem;
+}
+
+.mini-modal-description {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.85rem;
+}
+
+.mini-modal-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.mini-modal-input {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+}
+
+.mini-modal-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-surface);
+}
+
+.mini-modal-error {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+  margin-top: 0.5rem;
+}
+
+.mini-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.mini-modal-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-strong);
+  background-color: var(--color-hover-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.mini-modal-btn:hover {
+  background-color: var(--color-border-subtle);
+}
+
+.mini-modal-btn-primary {
+  color: #fff;
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.mini-modal-btn-primary:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* Delete-style confirmations (js/app.js's `Modal.confirm({ danger: true })`)
+   reuse the same primary-button slot, just in red instead of the accent
+   color - added instead of a Cancel/Delete-specific pair of classes since
+   every other modal use (New Note, New Folder, Rename, "create this note?")
+   already just needs the plain accent-colored primary button. */
+.mini-modal-btn-danger,
+.mini-modal-btn-danger:hover {
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+/* Generic disabled state for .icon-btn (favorite/star is permanently
+   disabled - docs/03-FEATURE-SPEC.md's "Present in the UI but deliberately
+   not implemented" - and any other icon button could plausibly need this
+   later) - hand-written rather than a Tailwind `disabled:` variant since no
+   such class exists in the precompiled lib/tailwind/output.css build. */
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-btn:disabled:hover {
+  color: var(--color-text-faint);
+  background-color: transparent;
+}
+
+/* --- share modal (js/app.js's share flow) -----------------------------
+   Hand-rolled, same rationale as .search-dropdown above: a bespoke
+   overlay/dialog has no matching combination of classes already present
+   in the purged Tailwind build. */
+
+.share-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.4);
+  z-index: 40;
+}
+
+/* `:not(.hidden)` (rather than `display: flex` directly on
+   `.share-modal-overlay`) so this element's own `.hidden` toggle (see
+   js/app.js's openShareModal/closeShareModal) reliably wins: this file
+   loads after lib/tailwind/output.css, so a same-specificity `.hidden {
+   display: none }` vs. `.share-modal-overlay { display: flex }` would be
+   decided by source order (the later rule, ours, would always win) rather
+   than which class was added last - a two-class selector's higher
+   specificity avoids that trap regardless of stylesheet order. */
+.share-modal-overlay:not(.hidden) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-modal {
+  width: 24rem;
+  max-width: calc(100vw - 2rem);
+  background-color: #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
+  padding: 1.25rem;
+}
+
+.share-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.share-modal-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.share-modal-close {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #94a3b8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+}
+
+.share-modal-close:hover {
+  background-color: #f1f5f9;
+  color: #1e293b;
+}
+
+.share-modal-error {
+  color: #b91c1c;
+  font-size: 0.875rem;
+}
+
+.share-modal-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 0.3rem;
+}
+
+.share-modal-url-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.share-modal-url-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8125rem;
+  color: #1e293b;
+  background-color: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+}
+
+.share-modal-qr {
+  display: block;
+  width: 10rem;
+  height: 10rem;
+  margin: 0 auto 0.85rem;
+  image-rendering: pixelated;
+}
+
+.share-modal-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1e293b;
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.share-modal-btn:hover {
+  background-color: #e2e8f0;
+}
+
+.share-modal-btn-danger {
+  display: block;
+  width: 100%;
+  color: #b91c1c;
+  background-color: #fef2f2;
+  border-color: #fecaca;
+}
+
+.share-modal-btn-danger:hover {
+  background-color: #fee2e2;
+}
+
+/* --- graph view (graph.html / js/graph.js) --------------------------- */
+
+.graph-legend-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 9999px;
+}
+
+.graph-legend-dot--note {
+  background-color: #2563eb;
+}
+
+.graph-legend-dot--missing {
+  background-color: #fef3c7;
+  border: 1.5px dashed #b45309;
+}
+
+#graph-empty-message {
+  text-align: center;
+  padding: 0 2rem;
+}
+
+/* --- collapsible left sidebar (docs/03-FEATURE-SPEC.md: "Collapsible
+   sidebar ..."). `#sidebar` (an ID selector) beats the precompiled
+   `.w-72` utility class's plain-class selector on specificity, so no
+   `!important` is needed regardless of stylesheet load order - same fix
+   pattern as this file's dark-theme `[data-theme="dark"] .bg-white`-style
+   overrides. The sidebar's own content doesn't need to be individually
+   hidden: collapsing to 0 width with `overflow: hidden` is enough to make
+   all of it inaccessible/invisible, and un-collapsing restores it exactly
+   as it was (nothing inside the sidebar is unmounted or re-rendered). */
+#sidebar.sidebar-collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+/* --- split-mode resizable divider (docs/03-FEATURE-SPEC.md: "Split-pane
+   editor ... resizable via a draggable divider"). js/app.js drives
+   #editor-pane/#preview-pane's actual widths (a `flex-basis` percentage,
+   recomputed on drag) - this is just the draggable handle itself, plus
+   `min-width: 0` on both panes so they can actually shrink below their
+   content's intrinsic width instead of forcing a horizontal scrollbar at
+   an extreme ratio (a plain flex item's default `min-width: auto` would
+   otherwise refuse to shrink that far). */
+#editor-pane,
+#preview-pane {
+  min-width: 0;
+}
+
+.split-divider {
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  background-color: var(--color-border);
+  touch-action: none; /* let pointer events drive the drag instead of the browser's own touch scrolling */
+}
+
+.split-divider:hover {
+  background-color: var(--color-accent);
+}
+
+.split-divider.hidden {
+  display: none;
+}
+
+/* Applied to <body> for the duration of a divider drag (js/app.js) - keeps
+   the resize cursor and prevents the editor/preview text from being
+   selected while the pointer sweeps across them mid-drag. */
+body.split-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* --- editor view-mode toggle (Edit-only / Split / Preview-only) -------
+   js/app.js. Hand-rolled small button group, same rationale as
+   .share-modal-btn above: no matching combination of classes in the
+   purged Tailwind build for a compact segmented-control look. */
+
+.view-mode-btn {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #64748b;
+  background-color: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.view-mode-btn:hover {
+  background-color: #f1f5f9;
+}
+
+.view-mode-btn-active,
+.view-mode-btn-active:hover {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.view-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* --- top-bar "dotNotes" logo / Home link (index.html's <header>) -------
+   docs/03-FEATURE-SPEC.md's Home/folder-browse view - clicking the app
+   name always returns to the vault-root Home view (js/app.js's
+   navigateHome), from an open note or a deeper Home breadcrumb. Plain
+   inherited text styling (no bespoke color) so it reads as part of the
+   header, not as a normal link. */
+
+.app-logo-btn {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.app-logo-btn:hover {
+  color: var(--color-accent);
+}
+
+/* =========================================================================
+   Home / folder-browse view (docs/03-FEATURE-SPEC.md: "Home / folder-browse
+   view") - index.html's #home-view. Structure follows NoteDiscovery's
+   reference screenshots/live demo (assets/screenshot_notediscovery.png,
+   gamosoft-notediscovery-demo.hf.space), colors stay on this file's theme
+   variables. Hand-rolled throughout, same rationale as every other bespoke
+   widget in this file: no matching combination of classes in the purged
+   Tailwind build (grid layout in particular has no utility classes in it
+   at all - see this file's top-of-file note). */
+
+.home-view {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 2rem 2.5rem;
+}
+
+.home-app-title {
+  margin-bottom: 1.25rem;
+}
+
+.home-app-name {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-strong);
+}
+
+.home-tagline {
+  margin-top: 0.15rem;
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.home-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.home-breadcrumb-link {
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.home-breadcrumb-link:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.home-breadcrumb-current {
+  color: var(--color-accent);
+}
+
+.home-breadcrumb-separator {
+  color: var(--color-text-faintest);
+}
+
+.home-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.5rem;
+}
+
+.home-summary-text {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.home-summary-text strong {
+  color: var(--color-text-strong);
+  font-weight: 700;
+}
+
+.home-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 1rem;
+}
+
+.home-grid-empty {
+  color: var(--color-text-faint);
+  font-size: 0.875rem;
+  padding: 0.5rem 0.1rem;
+}
+
+.home-folder-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.9rem;
+  padding: 1rem;
+  text-align: left;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.home-folder-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.home-folder-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.home-folder-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.home-folder-card-icon {
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+.home-folder-card-name {
+  font-weight: 600;
+  color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-folder-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-faint);
+  font-size: 0.8125rem;
+}
+
+.home-folder-card-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-faintest);
+}
+
+/* =========================================================================
+   Note editor header, tabs + icon row, formatting toolbar
+   (docs/03-FEATURE-SPEC.md: "Note editor header ..." and "Markdown
+   formatting toolbar ..."). index.html's #note-editor-view. */
+
+.note-editor-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* `.note-editor-view.hidden` (two classes), not `.hidden` alone: this file
+   loads after lib/tailwind/output.css, so a same-specificity `.hidden {
+   display: none }` vs. this rule's own `.note-editor-view { display: flex
+   }` would be decided by source order (this rule, being later, would
+   always win and leave the note editor visible underneath the Home view)
+   rather than which class js/app.js added last - same fix pattern as
+   .share-modal-overlay:not(.hidden) and .formatting-toolbar.hidden
+   elsewhere in this file. Caught live: the note header/tabs/toolbar/
+   textarea were rendering underneath the Home view grid before this rule
+   was added. */
+.note-editor-view.hidden {
+  display: none;
+}
+
+.note-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface);
+}
+
+.note-title-input {
+  min-width: 8rem;
+  width: min(26rem, 40%);
+  padding: 0.35rem 0.6rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-strong);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+}
+
+.note-title-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-surface);
+}
+
+.note-header-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.note-edited-label {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+}
+
+.note-tabs-row {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface);
+}
+
+.note-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.icon-btn-danger:hover {
+  color: var(--color-danger);
+  background-color: var(--color-hover-surface);
+}
+
+.formatting-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface);
+}
+
+.formatting-toolbar.hidden {
+  display: none;
+}
+
+.formatting-toolbar-divider {
+  width: 1px;
+  height: 1.1rem;
+  margin: 0 0.35rem;
+  background-color: var(--color-border);
+}
+
+.formatting-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.3rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text-faint);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.formatting-btn:hover {
+  color: var(--color-text-strong);
+  background-color: var(--color-hover-surface);
+}
+
+/* =========================================================================
+   Theme (light/dark) - docs/03-FEATURE-SPEC.md: "Light/dark theme toggle
+   in the top nav". js/theme.js sets `data-theme="dark"` on <html> once
+   the user opts in (or the OS prefers dark and they haven't chosen yet);
+   absence of the attribute (or `data-theme="light"`) means light, today's
+   only look.
+
+   Mechanism: CSS custom properties for the handful of colors that recur
+   across the app, redefined under `[data-theme="dark"]`. The bulk of the
+   app's coloring, though, comes from *precompiled* Tailwind utility
+   classes (bg-white, text-slate-700, etc.) - lib/tailwind/output.css is a
+   one-time purged build with no `dark:` variants in it (see this file's
+   top-of-file note on why hand-written CSS is this codebase's fallback
+   for anything the precompiled build doesn't cover). Rather than retrofit
+   every element in index.html to swap from a Tailwind class to a
+   var()-based one, this re-declares each *currently-used* Tailwind color
+   utility class under the `[data-theme="dark"]` attribute selector below,
+   pointed at the variables here. `[data-theme="dark"] .bg-white` (an
+   attribute selector + a class selector) is more specific than the
+   precompiled build's plain `.bg-white`, so it wins regardless of
+   stylesheet load order, no `!important` needed. This only has to list
+   classes actually present in index.html/js/*.js today (grepped for
+   while building this) - a new element added later using an
+   as-yet-unlisted Tailwind color class simply won't re-theme until it's
+   added here too. */
+
+:root {
+  --color-bg: #f1f5f9;           /* bg-slate-100 - page background */
+  --color-surface: #ffffff;      /* bg-white - header/sidebar/editor/panel backgrounds */
+  --color-surface-alt: #f8fafc;  /* disabled editor / code-block backgrounds */
+  --color-border: #cbd5e1;       /* border-slate-300 */
+  --color-border-subtle: #e2e8f0; /* border-slate-200 */
+  --color-text: #0f172a;         /* text-slate-900 */
+  --color-text-strong: #1e293b;  /* text-slate-800 */
+  --color-text-secondary: #334155; /* text-slate-700 */
+  --color-text-muted: #475569;   /* text-slate-600 */
+  --color-text-faint: #64748b;   /* text-slate-500 */
+  --color-text-faintest: #94a3b8; /* text-slate-400 */
+  --color-accent: #2563eb;       /* bg/text-blue-600 */
+  --color-accent-hover: #1d4ed8; /* hover:bg-blue-700 */
+  --color-accent-surface: #dbeafe; /* bg-blue-100 - selected file-tree row */
+  --color-accent-text-strong: #1e40af; /* text-blue-800 - selected file-tree row */
+  --color-hover-surface: #f1f5f9; /* hover:bg-slate-100 */
+  --color-success: #059669;      /* text-emerald-600 */
+  --color-danger: #dc2626;       /* text-red-600 */
+}
+
+[data-theme="dark"] {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-alt: #273449;
+  --color-border: #334155;
+  --color-border-subtle: #334155;
+  --color-text: #e2e8f0;
+  --color-text-strong: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-faint: #94a3b8;
+  --color-text-faintest: #64748b;
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-surface: #1e3a5f;
+  --color-accent-text-strong: #93c5fd;
+  --color-hover-surface: #334155;
+  --color-success: #34d399;
+  --color-danger: #f87171;
+}
+
+[data-theme="dark"] body,
+[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--color-bg);
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .bg-white {
+  background-color: var(--color-surface);
+}
+
+[data-theme="dark"] .bg-blue-100 {
+  background-color: var(--color-accent-surface);
+}
+
+[data-theme="dark"] .border-slate-300 {
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .border-slate-200 {
+  border-color: var(--color-border-subtle);
+}
+
+[data-theme="dark"] .text-slate-900 {
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .text-slate-800 {
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .text-slate-700 {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .text-slate-600 {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .text-slate-500 {
+  color: var(--color-text-faint);
+}
+
+[data-theme="dark"] .text-slate-400 {
+  color: var(--color-text-faintest);
+}
+
+[data-theme="dark"] .text-blue-600 {
+  color: var(--color-accent);
+}
+
+[data-theme="dark"] .text-blue-800 {
+  color: var(--color-accent-text-strong);
+}
+
+[data-theme="dark"] .text-emerald-600 {
+  color: var(--color-success);
+}
+
+[data-theme="dark"] .text-red-600 {
+  color: var(--color-danger);
+}
+
+[data-theme="dark"] .hover\:bg-slate-100:hover {
+  background-color: var(--color-hover-surface);
+}
+
+[data-theme="dark"] .hover\:bg-blue-100:hover {
+  background-color: var(--color-accent-surface);
+}
+
+[data-theme="dark"] .hover\:text-slate-600:hover {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .hover\:bg-blue-700:hover {
+  background-color: var(--color-accent-hover);
+}
+
+[data-theme="dark"] .bg-blue-600 {
+  background-color: var(--color-accent);
+}
+
+/* --- theme: editor + search + view-mode toggle -------------------------- */
+
+[data-theme="dark"] #editor {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+[data-theme="dark"] #editor:disabled {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-faintest);
+}
+
+[data-theme="dark"] #editor::placeholder {
+  color: var(--color-text-faintest);
+}
+
+[data-theme="dark"] .view-mode-btn {
+  color: var(--color-text-faint);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .view-mode-btn:hover {
+  background-color: var(--color-hover-surface);
+}
+
+[data-theme="dark"] .view-mode-btn-active,
+[data-theme="dark"] .view-mode-btn-active:hover {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+[data-theme="dark"] .search-input {
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .search-dropdown {
+  background-color: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .search-result {
+  border-top-color: var(--color-border-subtle);
+}
+
+[data-theme="dark"] .search-result:hover {
+  background-color: var(--color-hover-surface);
+}
+
+[data-theme="dark"] .search-result-title {
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .search-result-path {
+  color: var(--color-text-faintest);
+}
+
+[data-theme="dark"] .search-result-snippet {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .search-empty {
+  color: var(--color-text-faintest);
+}
+
+/* --- theme: rendered markdown preview ----------------------------------
+   Code blocks (.note-preview pre) deliberately keep a light background
+   even in dark mode: only a light-optimized highlight.js theme
+   (lib/highlightjs/styles/github.min.css) is vendored, so its token
+   colors (dark text, some fairly low-contrast) stay legible by leaving
+   them on a light "card" rather than inverting the page around them.
+   Mermaid diagrams (rendered as inline SVG by markdown.js, untouched by
+   this phase) are left as their own light-themed islands for the same
+   reason - swapping either would mean vendoring/configuring a second,
+   dark-specific theme, out of scope for this pass. */
+
+[data-theme="dark"] .note-preview h1,
+[data-theme="dark"] .note-preview h2,
+[data-theme="dark"] .note-preview h3,
+[data-theme="dark"] .note-preview h4,
+[data-theme="dark"] .note-preview h5,
+[data-theme="dark"] .note-preview h6 {
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .note-preview {
+  color: var(--color-text);
+}
+
+[data-theme="dark"] .note-preview a {
+  color: var(--color-accent);
+}
+
+[data-theme="dark"] .note-preview a.wikilink.wikilink-missing {
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .note-preview blockquote {
+  border-left-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .note-preview code:not(pre code) {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .note-preview th,
+[data-theme="dark"] .note-preview td {
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .note-preview th {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .note-preview hr {
+  border-top-color: var(--color-border);
+}
+
+/* --- theme: share modal -------------------------------------------------- */
+
+[data-theme="dark"] .share-modal-overlay {
+  background-color: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .share-modal {
+  background-color: var(--color-surface);
+}
+
+[data-theme="dark"] .share-modal-title {
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .share-modal-close {
+  color: var(--color-text-faintest);
+}
+
+[data-theme="dark"] .share-modal-close:hover {
+  background-color: var(--color-hover-surface);
+  color: var(--color-text-strong);
+}
+
+[data-theme="dark"] .share-modal-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .share-modal-url-input {
+  color: var(--color-text);
+  background-color: var(--color-surface-alt);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .share-modal-btn {
+  color: var(--color-text-strong);
+  background-color: var(--color-surface-alt);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .share-modal-btn:hover {
+  background-color: var(--color-hover-surface);
+}
+
+[data-theme="dark"] .share-modal-btn-danger {
+  color: #fca5a5;
+  background-color: #3f1d1d;
+  border-color: #7f1d1d;
+}
+
+[data-theme="dark"] .share-modal-btn-danger:hover {
+  background-color: #4c2323;
+}
+
+/* --- theme: Home view, note editor header/tabs/toolbar -----------------
+   Deliberately short: every rule for these elements above (.home-*,
+   .note-*, .formatting-*) is already written entirely against this file's
+   CSS custom properties (--color-surface, --color-text-*, --color-border*,
+   --color-accent*), which are themselves redefined under
+   `[data-theme="dark"]` at the top of this file - so these components
+   re-theme automatically with no separate dark-mode ruleset needed, unlike
+   the legacy elements above this comment that were built directly on
+   hardcoded Tailwind utility-class colors. */
+
+/* --- print (docs/03-FEATURE-SPEC.md's note-editor icon row: "print") ----
+   js/app.js's printCurrentNote() just calls window.print() - all the actual
+   "print only the note" work happens here, via the standard
+   visibility-swap technique: hide everything, then re-reveal only
+   #preview (and its descendants) and lift it out of the page's normal
+   flow. This always prints the *rendered* preview regardless of which
+   Edit/Split/Preview tab is on-screen at the time (#preview keeps
+   rendering in the background even while its pane is hidden - see
+   js/app.js's editor `input` handler) - printing raw, unrendered markdown
+   source would be a strange "print" experience for anyone but the note's
+   author mid-edit. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #preview,
+  #preview * {
+    visibility: visible;
+  }
+
+  #preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0;
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "dotnotes-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dev-only Playwright suite for dotNotes UI behavior that only a real browser can exercise (drag-and-drop, context menus, editor tabs). Not part of `dotnet test`, not a frontend build step - see README.md.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

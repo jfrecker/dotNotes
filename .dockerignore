@@ -1,0 +1,22 @@
+# Keep the Docker build context small and avoid ever copying local
+# build output, logs, or vault data into an image layer.
+**/bin/
+**/obj/
+**/vault/
+**/logs/
+.git/
+.gitignore
+.vs/
+.vscode/
+*.user
+docs/
+.claude/
+CHANGELOG.md
+HANDOVER.md
+README.md
+
+# Test projects (including tests/e2e's Node/Playwright tooling) are never
+# part of the published/runtime image - the Dockerfile's build stage only
+# ever COPYs src/DotNotes.Api and src/DotNotes.Core explicitly, but this
+# entry keeps it true even if that ever changes to a broader COPY.
+tests/

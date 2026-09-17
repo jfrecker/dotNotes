@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dotNotes — Shared note</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/lib/tailwind/output.css" />
+  <link rel="stylesheet" href="/lib/highlightjs/styles/github.min.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+
+  <!--
+    Same MathJax pre-configuration as index.html (see that file's comment):
+    automatic typesetting is disabled on load because markdown.js calls
+    MathJax.typesetPromise() itself, once per render.
+  -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+      },
+      svg: { fontCache: 'global' },
+      startup: { typeset: false }
+    };
+  </script>
+</head>
+<body class="h-full bg-slate-100 text-slate-900 antialiased">
+  <div class="mx-auto flex h-screen max-w-3xl flex-col">
+    <!-- Top bar: deliberately minimal - no file tree, no editor chrome,
+         no "new note"/upload UI. This is a read-only, single-note view. -->
+    <header class="flex flex-shrink-0 items-center gap-3 border-b border-slate-300 bg-white px-4 py-2 shadow-sm">
+      <h1 class="text-lg font-semibold text-slate-800">dotNotes</h1>
+      <span class="text-sm text-slate-500">Shared note (read-only)</span>
+      <span id="shared-status" class="ml-auto text-sm text-slate-400"></span>
+    </header>
+
+    <main class="flex-1 overflow-y-auto bg-white">
+      <div id="preview" class="note-preview p-6"></div>
+    </main>
+  </div>
+
+  <!-- Vendored libraries (wwwroot/lib/, served locally — no CDN at runtime) -->
+  <script src="/lib/marked/marked.umd.js"></script>
+  <script src="/lib/highlightjs/highlight.min.js"></script>
+  <script src="/lib/mermaid/mermaid.min.js"></script>
+  <script src="/lib/mathjax/tex-svg.js" id="MathJax-script"></script>
+
+  <!--
+    Intentionally NOT including js/wikilinks.js or js/api.js's note/graph
+    calls here: a shared session must not reach the main (unauthenticated)
+    /api/notes/* or /api/graph surface (see this phase's report) -
+    js/markdown.js already renders [[wikilinks]] as plain text whenever
+    `WikiLinks` is undefined or `plainWikilinks` is passed, so omitting it
+    is safe, not just harmless.
+  -->
+  <script src="/js/markdown.js"></script>
+  <script src="/js/shared.js"></script>
+</body>
+</html>

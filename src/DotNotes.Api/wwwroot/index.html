@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dotNotes</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/lib/tailwind/output.css" />
+  <link rel="stylesheet" href="/lib/highlightjs/styles/github.min.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+
+  <!--
+    Applies the persisted (localStorage) light/dark theme - or the OS
+    preference, if the user hasn't chosen one yet - as early as possible
+    (before the rest of the head/body parses) so there's no flash of the
+    wrong theme on load. See js/theme.js for the actual read/write logic;
+    this is the same vendored-nothing, plain-<script> approach as every
+    other module here (CLAUDE.md: no build step).
+  -->
+  <script src="/js/theme.js"></script>
+
+  <!--
+    MathJax must be configured *before* its script tag loads. We disable
+    automatic typesetting on page load (startup.typeset = false) because
+    markdown.js calls MathJax.typesetPromise() itself, once per preview
+    render, on freshly-rendered content only.
+  -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+      },
+      svg: { fontCache: 'global' },
+      startup: { typeset: false }
+    };
+  </script>
+</head>
+<body class="h-full bg-slate-100 text-slate-900 antialiased">
+  <div class="flex h-screen flex-col">
+    <!-- Top bar -->
+    <header class="flex flex-shrink-0 items-center gap-3 border-b border-slate-300 bg-white px-4 py-2 shadow-sm">
+      <!-- Doubles as the "Home" link (docs/01-PROJECT-PLAN.md's Phase 10 home/
+           folder-browse view) - clicking it always returns to the vault-root
+           Home view, from an open note or from a deeper Home breadcrumb.
+           Replaces the old plain `<h1>dotNotes</h1>` + the `#current-note-path`
+           path readout next to it, now redundant with the note editor header's
+           own inline title (below) and the Home view's breadcrumb. -->
+      <h1 class="text-lg font-semibold text-slate-800">
+        <button id="home-logo-btn" type="button" class="app-logo-btn" title="Go to Home">dotNotes</button>
+      </h1>
+
+      <!-- Collapsible sidebar toggle (docs/03-FEATURE-SPEC.md: "Collapsible
+           sidebar ..."). Lives in the top bar, not inside <aside id="sidebar">
+           itself, so it stays reachable once the sidebar is collapsed. -->
+      <button
+        id="sidebar-toggle-btn"
+        type="button"
+        title="Hide sidebar"
+        aria-pressed="false"
+        class="icon-btn"
+      >
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 5.25h16.5m-16.5 6.75h16.5m-16.5 6.75h16.5" />
+        </svg>
+      </button>
+
+      <!-- Search box + results dropdown (docs/03-FEATURE-SPEC.md: "Full-text search across the vault") -->
+      <div id="search-box" class="relative ml-auto">
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Search notes…"
+          autocomplete="off"
+          class="search-input"
+        />
+        <div id="search-results" class="search-dropdown hidden"></div>
+      </div>
+
+      <a
+        href="/graph.html"
+        class="rounded px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+      >
+        Graph view
+      </a>
+      <button
+        id="theme-toggle-btn"
+        type="button"
+        title="Toggle light/dark theme"
+        class="rounded px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+      >
+        Dark mode
+      </button>
+      <span id="save-status" class="text-sm text-slate-400" aria-live="polite"></span>
+    </header>
+
+    <div class="flex flex-1 flex-col overflow-hidden">
+      <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar: file tree (structure/layout follows NoteDiscovery's
+             reference screenshots - assets/screenshot_notediscovery.png,
+             assets/+New_button.png - per docs/01-PROJECT-PLAN.md's Phase
+             10; colors stay on this app's own theme CSS variables, not
+             NoteDiscovery's navy/yellow palette. -->
+        <aside id="sidebar" class="flex w-72 flex-shrink-0 flex-col border-r border-slate-300 bg-white">
+          <!-- "FILES" header + a single "+ New" dropdown (js/menu.js),
+               replacing last round's separate "+ New note"/"+ New folder"
+               buttons. -->
+          <div class="flex items-center border-b border-slate-200 p-2">
+            <span class="sidebar-eyebrow">Files</span>
+            <button
+              id="new-menu-btn"
+              type="button"
+              class="new-menu-btn ml-auto"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New
+            </button>
+          </div>
+
+          <!-- "Folders & Notes" sub-header, plus a name-ascending/descending
+               sort-toggle button (docs/03-FEATURE-SPEC.md's "Sidebar folder
+               reorder ... and a name-ascending/descending sort toggle" -
+               NoteDiscovery-style "A↓" icon; js/tree.js owns the actual sort
+               state/logic, js/app.js just wires this button to it).
+               Expand/collapse-all icons from the NoteDiscovery reference are
+               still skipped - the tree is small enough for a single-user
+               vault that it doesn't earn the complexity yet. Refresh
+               (pre-existing) is kept as a small icon button here instead of
+               the old text button. -->
+          <div class="sidebar-subheader flex items-center px-2">
+            <span>Folders &amp; Notes</span>
+            <button
+              id="sort-toggle-btn"
+              type="button"
+              title="Sort A→Z"
+              aria-label="Toggle folder sort order"
+              class="icon-btn ml-auto"
+            >
+              <span id="sort-toggle-label" aria-hidden="true">A↓</span>
+            </button>
+            <button
+              id="refresh-tree-btn"
+              type="button"
+              title="Refresh file tree"
+              aria-label="Refresh file tree"
+              class="icon-btn"
+            >
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- "Drag=Move" hint - also the vault-root drop zone (matches the
+               live NoteDiscovery demo: dragging any row over *this*
+               element, not the general tree background or the header
+               above, is what moves an item to the vault root - see
+               js/tree.js's wireRootDropZone). -->
+          <div id="tree-root-drop-zone" class="tree-root-drop-hint" data-drop-target="root">
+            <svg width="12" height="12" class="flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 4v8m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            <span id="tree-root-drop-label">Drag = Move</span>
+          </div>
+
+          <div id="file-tree" class="flex-1 overflow-y-auto p-2 text-sm">
+            <p class="px-1 py-2 text-slate-400">Loading…</p>
+          </div>
+        </aside>
+
+        <!-- Main content: either the Home/folder-browse view, or an open
+             note's editor - never both (js/app.js's navigateHome/selectFile
+             toggle which one is visible). Structure follows NoteDiscovery's
+             reference screenshots/live demo (docs/01-PROJECT-PLAN.md's Phase
+             10; assets/screenshot_notediscovery.png,
+             gamosoft-notediscovery-demo.hf.space), colors stay on this app's
+             theme CSS variables. -->
+        <main class="flex flex-1 flex-col overflow-hidden">
+          <!-- Home / folder-browse view (docs/03-FEATURE-SPEC.md: "Home /
+               folder-browse view"). This is the default landing state (no
+               note open): its card grid shows both the subfolders *and* the
+               notes directly inside the currently-browsed folder - a folder
+               card navigates deeper, a note card opens that note in the
+               editor (js/app.js's renderFolderGrid). Notes can still also be
+               opened via the sidebar tree, search, backlinks, or a
+               wikilink, exactly as before this phase. -->
+          <section id="home-view" class="home-view">
+            <div id="home-app-title" class="home-app-title">
+              <h2 class="home-app-name">dotNotes</h2>
+              <p class="home-tagline">Your self-hosted markdown knowledge base</p>
+            </div>
+            <nav id="home-breadcrumb" class="home-breadcrumb" aria-label="Breadcrumb"></nav>
+            <div class="home-summary-bar">
+              <div id="home-summary-text" class="home-summary-text"></div>
+              <!-- Reuses the sidebar's "+New" menu items (js/app.js's
+                   createNewNote/createNewFolder) rather than a second
+                   implementation, just pre-filled with the currently-browsed
+                   folder so it's actually useful from here (see those
+                   functions' doc comments). -->
+              <button
+                id="home-new-btn"
+                type="button"
+                class="new-menu-btn"
+                aria-haspopup="true"
+                aria-expanded="false"
+              >
+                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                New
+              </button>
+            </div>
+            <div id="home-folder-grid" class="home-folder-grid"></div>
+          </section>
+
+          <!-- Note editor view: header (inline-editable title/rename, undo/
+               redo, delete, "Edited <date>"), the Edit/Split/Preview tab
+               control + icon row, the formatting toolbar (hidden in
+               Preview), then the split-pane editor + preview themselves. -->
+          <section id="note-editor-view" class="note-editor-view hidden">
+            <div class="note-header">
+              <input
+                id="note-title-input"
+                type="text"
+                class="note-title-input"
+                spellcheck="false"
+                autocomplete="off"
+                title="Click to rename this note"
+              />
+              <div class="note-header-icons">
+                <!-- Previous/next-note navigation within the current
+                     folder's note list, per the sidebar's active sort order
+                     (js/tree.js's getSortedChildren) - docs/03-FEATURE-
+                     SPEC.md's note editor header. NOT undo/redo (a mislabel
+                     carried over from the NoteDiscovery reference in Phase
+                     10, corrected in Phase 11 - assets/update.txt). Native
+                     browser undo/redo (ctrl+Z) in the textarea is separate
+                     and untouched. -->
+                <button id="prev-note-btn" type="button" class="icon-btn" title="Previous note in this folder">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+                <button id="next-note-btn" type="button" class="icon-btn" title="Next note in this folder">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+                <button id="delete-note-btn" type="button" class="icon-btn icon-btn-danger" title="Delete this note">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
+                </button>
+              </div>
+              <span id="note-edited-label" class="note-edited-label"></span>
+            </div>
+
+            <div class="note-tabs-row">
+              <!-- Edit/Split/Preview tab control (docs/03-FEATURE-SPEC.md:
+                   "Editor view-mode toggle ..."). Supersedes the Phase 9
+                   two/three-way toggle button that used to live in a
+                   separate toolbar strip above the editor - same element
+                   IDs/data attributes and the same sessionStorage-backed
+                   state in js/app.js (getStoredViewMode/applyViewMode/
+                   setViewMode), just moved and restyled as tabs, so no new
+                   persistence mechanism was invented for this. -->
+              <div id="view-mode-toggle" class="view-mode-toggle" role="tablist" aria-label="Editor view mode">
+                <button type="button" data-view-mode="edit" role="tab" class="view-mode-btn" title="Full markdown source editor, no preview pane">Edit</button>
+                <button type="button" data-view-mode="split" role="tab" class="view-mode-btn" title="Source editor and live preview side by side">Split</button>
+                <button type="button" data-view-mode="preview" role="tab" class="view-mode-btn" title="Rendered read-only output, no toolbar">Preview</button>
+              </div>
+
+              <!-- Icon row. Favorite/star is rendered permanently disabled
+                   per docs/03-FEATURE-SPEC.md's "Present in the UI but
+                   deliberately not implemented" - no favorites store exists
+                   and building one is out of scope for this pass. The rest
+                   need no backend: export/print/copy-link/fullscreen are
+                   pure client-side actions, and share reuses the existing
+                   #share-modal/shareCurrentNote flow (docs/04-API-SPEC.md's
+                   Sharing section) rather than a second implementation. -->
+              <div class="note-icon-row">
+                <button id="favorite-btn" type="button" class="icon-btn" title="Favorite (not implemented)" disabled aria-disabled="true">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+                  </svg>
+                </button>
+                <button id="export-note-btn" type="button" class="icon-btn" title="Export this note as a .md file">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                </button>
+                <button id="print-note-btn" type="button" class="icon-btn" title="Print this note">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
+                  </svg>
+                </button>
+                <button id="copy-link-btn" type="button" class="icon-btn" title="Copy a link to this note">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                </button>
+                <button id="share-note-btn" type="button" class="icon-btn" title="Share this note (read-only link)">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" />
+                  </svg>
+                </button>
+                <button id="fullscreen-btn" type="button" class="icon-btn" title="Toggle fullscreen">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Formatting toolbar (docs/03-FEATURE-SPEC.md: "Markdown
+                 formatting toolbar in Edit and Split modes") - hidden
+                 entirely in Preview mode by js/app.js's applyViewMode.
+                 Every button calls into js/app.js's small family of
+                 insertAtCursor-based helpers (wrapSelection/applyLinePrefix/
+                 etc.) - no new cursor/selection-handling code path. The
+                 "Image" button doubles as the existing upload flow (it opens
+                 the same #media-upload-input file picker used since Phase 5)
+                 rather than inserting a dead placeholder, since a real
+                 working upload already exists - see js/app.js's
+                 triggerImageToolbarAction. -->
+            <div id="formatting-toolbar" class="formatting-toolbar">
+              <button type="button" data-format="bold" class="formatting-btn" title="Bold"><strong>B</strong></button>
+              <button type="button" data-format="italic" class="formatting-btn" title="Italic"><em>I</em></button>
+              <button type="button" data-format="strikethrough" class="formatting-btn" title="Strikethrough"><s>S</s></button>
+              <button type="button" data-format="heading" class="formatting-btn" title="Heading">H</button>
+              <span class="formatting-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" data-format="link" class="formatting-btn" title="Link">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </button>
+              <button type="button" data-format="image" class="formatting-btn" title="Insert image, audio, video, or PDF">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 6.75h18M3 6.75a1.5 1.5 0 01-1.5-1.5V4.5A1.5 1.5 0 013 3h18a1.5 1.5 0 011.5 1.5v.75a1.5 1.5 0 01-1.5 1.5m-18 0v10.5A1.5 1.5 0 004.5 19.5h15a1.5 1.5 0 001.5-1.5V6.75" />
+                </svg>
+              </button>
+              <span class="formatting-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" data-format="code" class="formatting-btn" title="Inline code">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+                </svg>
+              </button>
+              <button type="button" data-format="codeblock" class="formatting-btn" title="Code block">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3M4.5 4.5h15a1.5 1.5 0 011.5 1.5v10.5a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 16.5V6A1.5 1.5 0 014.5 4.5z" />
+                </svg>
+              </button>
+              <button type="button" data-format="blockquote" class="formatting-btn" title="Blockquote">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h3v3.75c0 1.243-.84 2.25-2.25 2.25H7.5m9-6h3v3.75c0 1.243-.84 2.25-2.25 2.25H16.5" />
+                </svg>
+              </button>
+              <span class="formatting-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" data-format="bullet-list" class="formatting-btn" title="Bullet list">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                </svg>
+              </button>
+              <button type="button" data-format="numbered-list" class="formatting-btn" title="Numbered list">1.</button>
+              <button type="button" data-format="task-list" class="formatting-btn" title="Task list">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4" />
+                </svg>
+              </button>
+              <button type="button" data-format="table" class="formatting-btn" title="Table">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="4.5" width="18" height="15" rx="1.5" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5h18M3 14.5h18M9.5 4.5v15M15.5 4.5v15" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- `accept` mirrors docs/04-API-SPEC.md's Media section allow-list; it's just a
+                 picker filter/hint, the backend still enforces this server-side. -->
+            <input
+              id="media-upload-input"
+              type="file"
+              class="hidden"
+              accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm,application/pdf"
+            />
+
+            <div class="flex flex-1 overflow-hidden">
+              <section id="editor-pane" class="flex flex-col border-r border-slate-300 bg-white">
+                <textarea
+                  id="editor"
+                  class="h-full w-full flex-1 resize-none border-0 p-4 font-mono text-sm leading-relaxed text-slate-900 focus:outline-none focus:ring-0"
+                  placeholder="Select a note from the sidebar, or create a new one, to start writing…"
+                  spellcheck="false"
+                  disabled
+                ></textarea>
+              </section>
+              <!-- Split-mode resize divider (docs/03-FEATURE-SPEC.md: "Split-
+                   pane editor ... resizable via a draggable divider") - only
+                   ever visible in Split mode (js/app.js's applyViewMode).
+                   Dragging it adjusts #editor-pane/#preview-pane's flex-basis
+                   percentages directly, so the ratio (persisted in
+                   localStorage) automatically stays correct on window
+                   resize or a sidebar collapse (#4) - both just change how
+                   much total width those percentages are dividing up. -->
+              <div id="split-divider" class="split-divider" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview panes"></div>
+              <section id="preview-pane" class="overflow-y-auto bg-white">
+                <div id="preview" class="note-preview p-6"></div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <!-- Backlinks panel (docs/03-FEATURE-SPEC.md: "Backlinks panel per note") -->
+      <footer class="flex flex-shrink-0 items-start gap-2 border-t border-slate-300 bg-white px-4 py-2 text-sm">
+        <span class="mt-0.5 flex-shrink-0 font-medium text-slate-700">Backlinks</span>
+        <div id="backlinks-list" class="flex flex-1 flex-wrap items-center gap-1.5">
+          <span class="text-slate-400">No note open</span>
+        </div>
+        <button
+          id="backlinks-refresh-btn"
+          type="button"
+          title="Re-check backlinks (they don't update live if another tab edited a linking note)"
+          class="flex-shrink-0 rounded px-2 py-0.5 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        >
+          Refresh
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Share modal (docs/04-API-SPEC.md's "Sharing" section) - hand-rolled
+       markup/CSS (css/app.css), same convention as the search dropdown,
+       since this is a bespoke widget with no matching precompiled Tailwind
+       utility classes to reuse (see app.css's note on that). -->
+  <div id="share-modal" class="share-modal-overlay hidden">
+    <div class="share-modal" role="dialog" aria-label="Share this note">
+      <div class="share-modal-header">
+        <h2 class="share-modal-title">Share this note</h2>
+        <button id="share-modal-close-btn" type="button" class="share-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <p id="share-modal-error" class="share-modal-error hidden"></p>
+      <div id="share-modal-body" class="hidden">
+        <label for="share-modal-url" class="share-modal-label">Read-only link</label>
+        <div class="share-modal-url-row">
+          <input id="share-modal-url" type="text" readonly class="share-modal-url-input" />
+          <button id="share-modal-copy-btn" type="button" class="share-modal-btn">Copy</button>
+        </div>
+        <img id="share-modal-qr" class="share-modal-qr" alt="QR code for the shared note link" />
+        <button id="share-modal-revoke-btn" type="button" class="share-modal-btn share-modal-btn-danger">
+          Revoke share
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- One reusable themed modal (docs/03-FEATURE-SPEC.md: "In-app themed
+       modal ... replacing native prompt()/confirm() for New Note, New
+       Folder, Rename, and delete confirmations"). js/app.js's `Modal`
+       object drives all of these through this one piece of markup -
+       `Modal.prompt()` for a labeled-input dialog (New Note, New Folder,
+       Rename), `Modal.confirm()` for a Cancel/primary-action-only one
+       (delete, "create this note?"). IDs keep the `rename-modal*` naming
+       from when this was rename-only, since it's still the same element,
+       just generalized - not renamed, to avoid a churny, purely-cosmetic ID
+       change. A native prompt()/confirm() can't be themed (it would stay
+       OS-white even in dark mode) - same hand-rolled-overlay pattern as
+       #share-modal above. -->
+  <div id="rename-modal" class="mini-modal-overlay hidden">
+    <div class="mini-modal" role="dialog" aria-modal="true" aria-labelledby="rename-modal-title">
+      <h2 id="rename-modal-title" class="mini-modal-title">Rename</h2>
+      <p id="rename-modal-description" class="mini-modal-description"></p>
+      <div id="rename-modal-field">
+        <label id="rename-modal-label" for="rename-modal-input" class="mini-modal-label">New name</label>
+        <input id="rename-modal-input" type="text" class="mini-modal-input" autocomplete="off" />
+      </div>
+      <p id="rename-modal-error" class="mini-modal-error hidden"></p>
+      <div class="mini-modal-actions">
+        <button id="rename-modal-cancel-btn" type="button" class="mini-modal-btn">Cancel</button>
+        <button id="rename-modal-confirm-btn" type="button" class="mini-modal-btn mini-modal-btn-primary">Rename</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vendored libraries (wwwroot/lib/, served locally — no CDN at runtime) -->
+  <script src="/lib/marked/marked.umd.js"></script>
+  <script src="/lib/highlightjs/highlight.min.js"></script>
+  <script src="/lib/mermaid/mermaid.min.js"></script>
+  <script src="/lib/mathjax/tex-svg.js" id="MathJax-script"></script>
+
+  <!-- App scripts -->
+  <script src="/js/api.js"></script>
+  <script src="/js/wikilinks.js"></script>
+  <script src="/js/markdown.js"></script>
+  <script src="/js/menu.js"></script>
+  <script src="/js/tree.js"></script>
+  <script src="/js/search.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+## .NET
+bin/
+obj/
+*.user
+
+## Logs written by the app at runtime
+logs/
+
+## The vault is user data, not source — never commit it by default.
+## Not anchored to the repo root: the default `Vault:RootPath` ("vault")
+## resolves relative to the app's content root, i.e. src/DotNotes.Api/vault/
+## when run from there, not a repo-root-level vault/.
+vault/
+
+## IDE / OS cruft
+.vs/
+.vscode/
+*.swp
+.DS_Store
+
+## Windows "mark of the web" sidecar files, picked up when files are
+## copied off an NTFS volume (e.g. via a Windows-side file transfer).
+*:Zone.Identifier
+
+#local folders
+/assets
+
+## tests/e2e (Playwright, dev-only test tooling - see tests/e2e/README.md):
+## Node deps, downloaded browser artifacts, and the throwaway test vault
+## must never be committed. The spec files themselves (tests/e2e/*.js,
+## tests/e2e/specs/) ARE committed.
+tests/e2e/node_modules/
+tests/e2e/.chromium-libs/
+tests/e2e/.e2e-vault/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/.cache/
+# Local development tooling (not part of the public release)
+.claude/
+CLAUDE.md
+
+# Local development tooling (not part of the public release)
+.claude/
+CLAUDE.md
+docs/

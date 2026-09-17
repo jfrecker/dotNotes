@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Microsoft.Extensions.Options is framework-agnostic (used by console
+      apps, workers, and web apps alike) and carries no ASP.NET Core
+      dependency, so referencing it here does not violate the "Core has
+      zero ASP.NET Core dependencies" rule in CLAUDE.md / docs/02-ARCHITECTURE.md.
+      It gives DotNotes.Core services (e.g. FileSystemNoteRepository) a
+      framework-free way to consume IOptions<T> bound in DotNotes.Api.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+
+    <!--
+      Microsoft.Extensions.Hosting.Abstractions gives DotNotes.Core
+      BackgroundService/IHostedService (used by VaultWatcherService to
+      keep the link index live) without pulling in ASP.NET Core itself -
+      it's the same lean, framework-agnostic tier as Microsoft.Extensions.Options
+      above (console apps and worker services use it too). Only
+      DotNotes.Api's Program.cs actually registers it as a hosted service.
+      Microsoft.Extensions.Logging.Abstractions (ILogger<T>) is a
+      transitive dependency of it but is referenced directly here too,
+      since VaultWatcherService takes an ILogger<VaultWatcherService>
+      constructor dependency directly.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>
