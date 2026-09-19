@@ -25,6 +25,7 @@ during Phase 8 (or as each phase completes them).
 - [x] Image/audio/video/PDF embedding with inline preview
 - [x] MCP server so Claude Desktop/Claude Code/Cursor can search and edit notes directly
 - [x] Folder & subfolder management: create folders, move/rename notes and folders via the UI
+- [x] Delete a note or a folder from the sidebar's right-click menu (deleting a folder removes everything inside it, behind a confirmation prompt)
 - [x] Editor view-mode toggle (Edit-only / Split / Preview-only), persisted for the session
 - [x] Sidebar drag-and-drop: drag notes and folders onto a folder (or the vault root) to move them, with a keyboard-accessible right-click "Move to…" fallback
 - [x] Rename notes and folders (right-click "Rename", inline-editable note title) with incoming `[[wikilinks]]` rewritten so backlinks never orphan

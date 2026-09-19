@@ -70,6 +70,12 @@ const Api = (() => {
     createFolder(path) {
       return request(`/api/folders/${encodePath(path)}`, { method: 'POST' });
     },
+    // Recursive: removes the folder and everything inside it. 404s if no
+    // folder exists at `path` (docs/04-API-SPEC.md) - deliberately *not*
+    // idempotent like deleteNote, so the UI can say "it's already gone".
+    deleteFolder(path) {
+      return request(`/api/folders/${encodePath(path)}`, { method: 'DELETE' });
+    },
     moveFolder(path, destinationPath) {
       return request(`/api/folders/${encodePath(path)}/move`, {
         method: 'POST',

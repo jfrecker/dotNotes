@@ -440,6 +440,14 @@
   cursor: not-allowed;
 }
 
+/* A destructive menu item (js/menu.js's `danger: true`, e.g. the file
+   tree's "Delete") - same danger color the delete-confirmation modal's
+   confirm button uses, so the two read as one action. */
+.app-menu-item-danger,
+.app-menu-item-danger .app-menu-item-icon {
+  color: var(--color-danger);
+}
+
 .app-menu-item-icon {
   display: inline-flex;
   flex-shrink: 0;

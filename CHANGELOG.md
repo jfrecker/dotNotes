@@ -2,6 +2,101 @@
 
 All notable changes to dotNotes are recorded here, most recent first.
 
+## Unreleased — folder delete, sidebar drag fix, Podman support (2026-09-19)
+
+Two bug fixes from real use plus Podman as a first-class runtime
+alongside Docker.
+
+### Fixed — deleting a folder from the UI did nothing
+
+The feature did not exist at any layer: `INoteRepository` had no folder
+delete, `FoldersEndpoints` mapped only `POST /api/folders/{**path}`
+(create and `/move`), and the sidebar's right-click menu offered only
+*Rename* and *Move to…*.
+
+- **`DELETE /api/folders/{**path}`** (new row in `docs/04-API-SPEC.md`)
+  — removes a folder and everything inside it at any depth. `204` on
+  success, `404 not_found` if no folder is there (including when a
+  *note* occupies that path — deleting that stays
+  `DELETE /api/notes/{**path}`'s job), `400 invalid_path`, `503
+  vault_unavailable`.
+- **`INoteRepository.DeleteFolderAsync`** routes through the same
+  `ResolveFolderPath` choke point every other folder operation uses, so
+  traversal/escape protection is written once. Because `IsWithinVaultRoot`
+  compares against the root *with* a trailing separator, the vault root
+  can never resolve there — deleting it is structurally impossible
+  rather than a special case, and `DELETE /api/folders/` answers `400`.
+  No `IVaultReorganizationService` orchestration is needed: a recursive
+  directory delete removes each file individually, so `VaultWatcherService`
+  sees a per-file `Deleted` event and reconciles the link/search indexes
+  exactly as it does for a single-note delete.
+- **Sidebar right-click menu gains a danger-styled *Delete*** (notes and
+  folders), behind the existing themed confirmation modal. `js/menu.js`
+  grew a `danger: true` item flag for it. The tree and wikilink cache
+  refresh afterwards, and if the open note was inside the deleted
+  folder the editor navigates Home — clearing `currentPath` *before* the
+  request so a pending autosave cannot write the note back.
+
+### Fixed — dragging a folder in the sidebar froze the page
+
+`Tree.reorderFolder()` redrew the whole tree (`container.innerHTML = ''`)
+*synchronously inside* the `drop` event dispatch, detaching the drag
+source mid-gesture. The browser then never fired `dragend` on that
+detached node — confirmed in Chromium: `dragstart` and `drop` fire,
+`dragend` never does. So `draggedEntry` stayed non-null for the life of
+the page, every drag-feedback class stayed applied (the root drop zone
+was stuck reading "Drop here to move to root"), and the browser's own
+drag session was never terminated, leaving the page unresponsive to the
+mouse until a reload.
+
+- **`afterDragEvent(fn)`** (`setTimeout`, a macrotask — a microtask
+  still runs before `dragend`) now wraps every drop branch that touches
+  tree DOM: the reorder redraw, the folder-row move, and the root
+  drop-zone move.
+- **`endDrag()`** is the one teardown for a drag however it ended,
+  clearing `draggedEntry` and stripping every feedback class via a
+  tracked `dragFeedbackNodes` set. Called from the row's `dragend`, from
+  document-level `dragend` *and* `drop` (bubble phase, so row handlers
+  still see `draggedEntry`), and defensively at the next `dragstart`.
+- Drop handlers capture the dragged entry locally and pass it to
+  `isInvalidDropTarget(entry, dragged)` rather than reading module state
+  teardown may have cleared. `dragleave` now ignores moves onto a row's
+  own child spans, so the highlight no longer flickers.
+- Client- *and* server-side refusal of a folder dropped onto itself or a
+  descendant is unchanged (`isInvalidDropTarget` / `MoveFolderAsync`'s
+  `400`), as is the `409` on a name collision; both are now pinned by
+  browser tests.
+
+### Added — Podman support (rootless and rootful)
+
+Same `Dockerfile`, same `docker-compose.yml` — no `Containerfile` and no
+Podman-specific compose file to keep in sync. All new settings are empty
+by default, so the Docker workflow is byte-for-byte unchanged (verified
+by building and running the image end-to-end).
+
+- **`docker-entrypoint.sh` handles a non-root start.** Under rootless
+  Podman with `--userns=keep-id` the container begins as an unprivileged
+  uid, where neither `chown` to another uid nor `setpriv`'s uid/group
+  change is permitted — the old script died on `chown: Operation not
+  permitted`. It now detects `id -u != 0`, skips the chown/privilege
+  drop, and execs the app directly; `PUID`/`PGID` are simply unnecessary
+  in that mode.
+- **`VAULT_MOUNT_OPTS`** (empty by default) appends mount options to the
+  vault bind mount — set to `:Z` on SELinux-enforcing hosts.
+- **`USERNS_MODE`** (empty by default) maps to the service's
+  `userns_mode`; `keep-id` under rootless Podman keeps vault files owned
+  by the host user instead of a subordinate uid.
+- **`deploy/podman/dotnotes.container`** — a Quadlet unit for running
+  dotNotes as a (rootless or rootful) systemd service.
+- **README.md gains a "Running with Podman" section**: prerequisites,
+  compose and plain `podman run`, `:Z` vs `:z`, rootless permissions,
+  Quadlet plus auto-start on boot, updating, and troubleshooting.
+  `DEPLOYMENT.md` points at it and documents the two new `.env`
+  variables.
+- The `Dockerfile` already used fully-qualified image names and an
+  unprivileged port (5175); both now carry comments explaining why they
+  matter for Podman, so neither is "simplified" away later.
+
 ## Phase 11 — v0.1 stabilization pass (2026-09-17)
 
 Frontend-only bug-fix pass over the Phase 9/10 UI, from real-use testing

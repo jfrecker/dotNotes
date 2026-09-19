@@ -7,9 +7,11 @@ namespace DotNotes.Api.Endpoints;
 /// <summary>
 /// Wires up the folder-management rows of docs/04-API-SPEC.md's Notes
 /// section: <c>POST /api/folders/{**path}</c> (create, <c>mkdir -p</c>
-/// semantics) and <c>POST /api/folders/{**path}/move</c> (move/rename a
-/// folder and everything inside it). Endpoints here are intentionally
-/// thin - all path validation and file I/O lives in
+/// semantics), <c>POST /api/folders/{**path}/move</c> (move/rename a
+/// folder and everything inside it) and
+/// <c>DELETE /api/folders/{**path}</c> (delete a folder and everything
+/// inside it). Endpoints here are intentionally thin - all path
+/// validation and file I/O lives in
 /// <see cref="INoteRepository"/> (DotNotes.Core); this file only
 /// translates HTTP in/out to/from that contract.
 /// </summary>
@@ -18,6 +20,7 @@ public static class FoldersEndpoints
     public static WebApplication MapFoldersEndpoints(this WebApplication app)
     {
         app.MapPost("/api/folders/{**path}", PostFolderRouteAsync);
+        app.MapDelete("/api/folders/{**path}", DeleteFolderAsync);
 
         return app;
     }
@@ -164,6 +167,47 @@ public static class FoldersEndpoints
         // returning - see its remarks and docs/06-DATA-MODEL.md's "Folder &
         // note move/rename" section - so no rebuild is needed here.
         return Results.Ok(new FolderMoveResponse(result.Path, result.RewrittenNotes));
+    }
+
+    /// <summary>
+    /// <c>DELETE /api/folders/{**path}</c> - removes the folder and
+    /// everything inside it.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>DELETE /api/notes/{**path}</c> (which is deliberately
+    /// idempotent and always 204s), a missing folder is reported as
+    /// <c>404 not_found</c>: this is a destructive, recursive operation
+    /// driven from a confirmation prompt in the UI, so "there was nothing
+    /// there" is information the caller wants rather than noise to
+    /// swallow. Path safety (no traversal, no escaping the vault, and the
+    /// vault root itself never deletable) is enforced inside
+    /// <see cref="INoteRepository.DeleteFolderAsync"/>, which surfaces a
+    /// <see cref="InvalidNotePathException"/> mapped to <c>400</c> here.
+    /// </remarks>
+    private static async Task<IResult> DeleteFolderAsync(
+        // Nullable so `DELETE /api/folders/` (an empty catch-all, i.e. the
+        // vault root itself) reaches this handler and is answered with a
+        // deliberate 400, rather than failing minimal-API parameter
+        // binding for a required `string` before the handler ever runs.
+        string? path,
+        INoteRepository noteRepository,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // A null/empty path names the vault root; DeleteFolderAsync
+            // rejects it as an invalid path, same as any other unsafe one.
+            var deleted = await noteRepository.DeleteFolderAsync(path ?? string.Empty, cancellationToken).ConfigureAwait(false);
+            return deleted ? Results.NoContent() : FolderNotFound(path!);
+        }
+        catch (InvalidNotePathException ex)
+        {
+            return InvalidPath(ex);
+        }
+        catch (VaultUnavailableException ex)
+        {
+            return VaultUnavailable(ex);
+        }
     }
 
     private static IResult FolderNotFound(string path) =>

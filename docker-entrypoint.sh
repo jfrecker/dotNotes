@@ -35,6 +35,19 @@
 # unlike some `su`/login-shell approaches which reset the environment).
 # It accepts a raw numeric uid/gid directly, so this works for an
 # arbitrary host PUID/PGID with no matching /etc/passwd entry required.
+#
+# Rootless Podman (and any `--user`/`user:` override): the container may
+# already start as an unprivileged uid rather than as root - most
+# notably with `--userns=keep-id` / `userns_mode: keep-id`, which maps
+# the host user straight through so files written into the bind-mounted
+# vault are owned by that host user with no PUID/PGID needed at all.
+# There is then nothing to drop *to*, and neither `chown` to a different
+# uid nor `setpriv`'s uid/group changes are permitted without
+# CAP_SETUID/CAP_SETGID - so this must not attempt either. The non-root
+# branch below just makes sure the vault directory exists and execs the
+# app directly; PUID/PGID are ignored in that case (the process already
+# runs as exactly the uid the caller chose). See README.md's "Running
+# with Podman".
 set -euo pipefail
 
 vault_root="${Vault__RootPath:-/data/vault}"
@@ -42,6 +55,11 @@ run_uid="${PUID:-1654}"
 run_gid="${PGID:-1654}"
 
 mkdir -p "$vault_root"
+
+if [ "$(id -u)" -ne 0 ]; then
+    exec dotnet DotNotes.Api.dll
+fi
+
 chown -R "$run_uid:$run_gid" "$vault_root"
 
 exec setpriv --reuid="$run_uid" --regid="$run_gid" --clear-groups --inh-caps=-all \

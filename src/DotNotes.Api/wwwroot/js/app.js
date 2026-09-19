@@ -924,6 +924,84 @@
     '<path stroke-linecap="round" stroke-linejoin="round" d="M11 12h6m0 0l-2-2m2 2l-2 2" />' +
     '</svg>';
 
+  const ICON_DELETE =
+    '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />' +
+    '</svg>';
+
+  /**
+   * Deletes `entry` after a confirmation prompt: a note via
+   * `DELETE /api/notes/{path}`, a folder via `DELETE /api/folders/{path}`
+   * (recursive - the folder and everything inside it, per
+   * docs/04-API-SPEC.md). The backend is the authority on what's legal to
+   * delete (it refuses anything that would escape the vault root, and the
+   * vault root itself); this only asks, calls, and reports.
+   */
+  async function deleteEntry(entry) {
+    const isFolder = entry.type === 'folder';
+    const confirmed = await Modal.confirm({
+      title: isFolder ? 'Delete folder' : 'Delete note',
+      description: isFolder
+        ? `Delete "${entry.path}" and everything inside it? This can't be undone.`
+        : `Delete "${entry.path}"? This can't be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    // If the open note is the one being deleted (or lives anywhere inside
+    // the folder being deleted), drop it *before* the request: navigateHome
+    // below flushes any dirty autosave first, and a flush against a
+    // just-deleted path would PUT the editor's buffer straight back to
+    // disk, silently undoing the delete. Same reasoning as
+    // deleteCurrentNote's own comment.
+    const wasOpen = !!currentPath
+      && (isFolder ? currentPath.startsWith(`${entry.path}/`) : currentPath === entry.path);
+    if (wasOpen) {
+      clearTimeout(autosaveTimer);
+      currentPath = null;
+    }
+
+    try {
+      if (isFolder) {
+        await Api.deleteFolder(entry.path);
+      } else {
+        await Api.deleteNote(entry.path);
+      }
+    } catch (err) {
+      // Surfaces the backend's own wording for the documented cases
+      // (docs/04-API-SPEC.md): 404 the folder no longer exists, 400 an
+      // invalid path, 503 vault unavailable.
+      if (wasOpen) {
+        currentPath = entry.path; // nothing was deleted - the note is still open
+      }
+      window.alert(`Could not delete "${entry.path}": ${err.message}`);
+      return;
+    }
+
+    await loadTree();
+    await WikiLinks.refresh();
+
+    if (wasOpen) {
+      editorEl.value = '';
+      editorEl.disabled = true;
+      Tree.setSelected(fileTreeEl, null);
+      await navigateHome(parentFolderOf(entry.path));
+      return;
+    }
+
+    // Not the open note, but the Home view could still be browsing the
+    // folder that just disappeared (or one inside it) - fall back to its
+    // nearest surviving ancestor rather than leaving an empty view.
+    if (isFolder
+      && !homeViewEl.classList.contains('hidden')
+      && (currentBrowseFolder === entry.path || currentBrowseFolder.startsWith(`${entry.path}/`))) {
+      await navigateHome(parentFolderOf(entry.path));
+    }
+  }
+
   function handleTreeContextMenu(entry, x, y, anchorEl) {
     Menu.open({
       x,
@@ -934,6 +1012,7 @@
       items: [
         { id: 'tree-context-rename', label: 'Rename', icon: ICON_RENAME, onSelect: () => openRenameModal(entry) },
         { id: 'tree-context-move-to', label: 'Move to…', icon: ICON_MOVE_TO, onSelect: () => openMoveToMenu(entry, anchorEl) },
+        { id: 'tree-context-delete', label: 'Delete', icon: ICON_DELETE, danger: true, onSelect: () => deleteEntry(entry) },
       ],
     });
   }

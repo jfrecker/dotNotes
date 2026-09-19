@@ -5,6 +5,14 @@ services:
       dockerfile: Dockerfile
     container_name: dotnotes
     restart: unless-stopped
+    # Empty (and therefore dropped from the config) unless set - this is
+    # here for rootless Podman, where `USERNS_MODE=keep-id` maps your host
+    # user straight through into the container so notes written into the
+    # bind-mounted vault below are owned by *you* on the host rather than
+    # by a subordinate uid you'd need `podman unshare` to touch. Docker
+    # ignores an empty value, so the Docker workflow is unchanged. See
+    # README.md's "Running with Podman".
+    userns_mode: "${USERNS_MODE:-}"
     ports:
       # host:container - override HOST_PORT in a .env file if 5175 is
       # already taken on your machine (see .env.example), e.g.
@@ -46,7 +54,17 @@ services:
       #
       # ./vault is created on first run if it doesn't exist - nothing
       # to create by hand before `docker compose up -d`.
-      - ${VAULT_PATH:-./vault}:/data/vault
+      #
+      # VAULT_MOUNT_OPTS is empty by default (no change to the Docker
+      # workflow). On an SELinux-enforcing host - Fedora, RHEL, CentOS
+      # Stream, typically with Podman - set `VAULT_MOUNT_OPTS=:Z` in
+      # `.env`, or the container is denied access to the mount. `:Z`
+      # relabels the directory for *this* container only; use `:z` (lower
+      # case, shared) instead if some other container also mounts the same
+      # path. Either way it relabels what VAULT_PATH points at, so don't
+      # point it at a directory shared with unrelated services. Both are
+      # accepted-and-ignored on non-SELinux hosts.
+      - ${VAULT_PATH:-./vault}:/data/vault${VAULT_MOUNT_OPTS:-}
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5175 && printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q 200"]
       interval: 30s
