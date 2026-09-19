@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>dotNotes</title>
-  <link rel="icon" href="data:," />
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
   <link rel="stylesheet" href="/lib/tailwind/output.css" />
   <link rel="stylesheet" href="/lib/highlightjs/styles/github.min.css" />
   <link rel="stylesheet" href="/css/app.css" />
@@ -47,7 +47,10 @@
            path readout next to it, now redundant with the note editor header's
            own inline title (below) and the Home view's breadcrumb. -->
       <h1 class="text-lg font-semibold text-slate-800">
-        <button id="home-logo-btn" type="button" class="app-logo-btn" title="Go to Home">dotNotes</button>
+        <button id="home-logo-btn" type="button" class="app-logo-btn" title="Go to Home">
+          <img class="app-logo-mark" src="/assets/favicon.svg" alt="" aria-hidden="true" />
+          <span>dotNotes</span>
+        </button>
       </h1>
 
       <!-- Collapsible sidebar toggle (docs/03-FEATURE-SPEC.md: "Collapsible

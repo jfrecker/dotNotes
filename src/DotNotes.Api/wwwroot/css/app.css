@@ -845,9 +845,22 @@ body.split-dragging {
    header, not as a normal link. */
 
 .app-logo-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+/* The app mark (wwwroot/assets/favicon.svg, same file the tab icon uses),
+   sized off the title's own font-size so it tracks the text in both themes.
+   The artwork carries its own colors, so no theme override is needed. */
+
+.app-logo-mark {
+  height: 1.4em;
+  width: auto;
+  flex-shrink: 0;
 }
 
 .app-logo-btn:hover {
