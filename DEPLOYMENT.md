@@ -149,6 +149,21 @@ file-level tool you'd already use for the rest of `/home`. Set
 writes files you own, since there's no Windows Explorer to smooth over
 the ownership mismatch here.
 
+### Podman (rootless or rootful)
+
+Podman runs the same `Dockerfile` and the same `docker-compose.yml` —
+there is no separate `Containerfile` and no Podman-specific compose
+file. Two extra `.env` settings cover the differences (SELinux
+labelling and rootless uid mapping), and
+`deploy/podman/dotnotes.container` is a ready-made Quadlet unit for
+running it as a systemd service.
+
+The full walkthrough — prerequisites, compose and plain `podman run`,
+`:Z` vs `:z`, rootless file-ownership, Quadlet/auto-start on boot,
+updating, and troubleshooting — lives in
+**[README.md's "Running with Podman"](README.md#running-with-podman)**
+rather than being duplicated here.
+
 ### Native on Windows (no Docker)
 
 Requires the .NET 10 SDK to publish (the ASP.NET Core Runtime alone is
@@ -296,6 +311,8 @@ directly for anything not covered by `.env.example`.
 | — | `ASPNETCORE_URLS` | `http://+:5175` baked into the Docker image; unset by default for a native `dotnet publish` output (Kestrel then falls back to `http://localhost:5000`) | not exposed directly — the image's Kestrel bind is fixed; remap the **host-side** port instead (below) | This is what actually controls the address/port Kestrel listens on. For native runs, always set this explicitly (e.g. `ASPNETCORE_URLS=http://localhost:5175`) rather than relying on the default. |
 | — | `PUID` / `PGID` | `1654` / `1654` (the image's built-in `app` user) | `PUID` / `PGID` | **Docker-only**, not part of the app's own config at all — read by `docker-entrypoint.sh` to decide which uid/gid the containerized `dotnet` process runs (and therefore writes vault files) as. Set to your own `id -u`/`id -g` so you own your notes on the host. Native deployments don't need this — the process already runs as whatever OS user started it. |
 | — | `HOST_PORT` (Docker Compose only) | `5175` | `HOST_PORT` | The host-side half of the port mapping in `docker-compose.yml` (`${HOST_PORT:-5175}:5175`). Change this instead of `Server:Port`/`ASPNETCORE_URLS` if `5175` is already taken on your machine — the container's internal port stays `5175` either way. |
+| — | `VAULT_MOUNT_OPTS` (Compose only) | empty | `VAULT_MOUNT_OPTS` | Extra options appended to the vault bind mount, e.g. `:Z`. Needed on SELinux-enforcing hosts (Fedora/RHEL/CentOS Stream, typically with Podman) or the container is denied access to the vault. Accepted-and-ignored elsewhere, so empty by default. See [README.md's "Running with Podman"](README.md#running-with-podman). |
+| — | `USERNS_MODE` (Compose only) | empty | `USERNS_MODE` | Maps to the service's `userns_mode`. Set to `keep-id` for **rootless Podman** so your host user maps straight through and vault files are owned by you; `PUID`/`PGID` are then unnecessary and ignored (`docker-entrypoint.sh` detects a non-root start and skips its chown/privilege-drop). Leave empty for Docker and for rootful Podman. |
 
 ---
 

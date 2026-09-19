@@ -612,6 +612,9 @@ public sealed class VaultReorganizationServiceTests : IDisposable
         public Task<string> CreateFolderAsync(string path, CancellationToken cancellationToken = default) =>
             _inner.CreateFolderAsync(path, cancellationToken);
 
+        public Task<bool> DeleteFolderAsync(string path, CancellationToken cancellationToken = default) =>
+            _inner.DeleteFolderAsync(path, cancellationToken);
+
         public Task<NoteWriteResult> MoveAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default) =>
             _inner.MoveAsync(sourcePath, destinationPath, cancellationToken);
 

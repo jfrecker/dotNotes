@@ -10,6 +10,7 @@
 .vscode/
 *.user
 docs/
+deploy/
 .claude/
 CHANGELOG.md
 HANDOVER.md

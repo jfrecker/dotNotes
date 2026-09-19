@@ -28,6 +28,70 @@ const Tree = (() => {
   let lastContainer = null;
   let lastEntries = null;
 
+  // Every DOM node currently carrying a drag-feedback class, so
+  // `endDrag()` below can strip them all even for rows whose own
+  // `dragleave`/`dragend` never fires (see its comment).
+  const dragFeedbackNodes = new Set();
+
+  /** Adds a drag-feedback class to `node` and remembers it for `endDrag`. */
+  function addDragFeedback(node, ...classNames) {
+    node.classList.add(...classNames);
+    dragFeedbackNodes.add(node);
+  }
+
+  /** Strips the drop-target/reorder markers from one row (its `dragleave`, or its `drop`). */
+  function clearRowDropFeedback(row) {
+    row.classList.remove('tree-row-drop-target', 'tree-row-reorder-before', 'tree-row-reorder-after');
+    row._reorderZone = null;
+  }
+
+  /**
+   * The single teardown for a drag, whatever ended it (a successful drop,
+   * a cancelled drag, or a drop whose handler replaced the tree). Clears
+   * `draggedEntry` and strips every drag-feedback class that was applied
+   * anywhere.
+   *
+   * Why this is centralized rather than left to each row's own `dragend`:
+   * a `drop` handler that rebuilds the tree removes the drag *source* row
+   * from the document while the drop is still being dispatched, and the
+   * browser then never fires `dragend` on that detached node. That left
+   * `draggedEntry` permanently non-null and the root drop zone stuck in
+   * its armed state ("Drop here to move to root") until a page reload -
+   * and, worse, left the browser's own drag session unterminated, which
+   * is what made the page stop responding to the mouse after dragging a
+   * folder. Every DOM-replacing drop handler now defers its work out of
+   * the drop dispatch (see `drop` below) *and* this runs from a
+   * document-level `drop`/`dragend` listener, so neither half depends on
+   * the other being enough.
+   */
+  function endDrag() {
+    draggedEntry = null;
+    for (const node of dragFeedbackNodes) {
+      node.classList.remove(
+        'tree-row-dragging',
+        'tree-row-drop-target',
+        'tree-row-reorder-before',
+        'tree-row-reorder-after',
+        'tree-root-drop-hint-armed',
+        'tree-root-drop-hint-over',
+      );
+      node._reorderZone = null;
+    }
+    dragFeedbackNodes.clear();
+  }
+
+  /**
+   * Runs `fn` after the current drag event's dispatch has finished. Any
+   * work that replaces or removes tree DOM must go through this: doing it
+   * synchronously inside `drop` detaches the drag source mid-gesture and
+   * wedges the browser's drag session (see `endDrag` above). `setTimeout`
+   * (a macrotask), not a microtask - microtasks still run before the
+   * browser gets to fire `dragend`.
+   */
+  function afterDragEvent(fn) {
+    setTimeout(fn, 0);
+  }
+
   // --- sort mode + per-folder-level custom order (docs/03-FEATURE-SPEC.md's
   // "Sidebar folder reorder ... and a name-ascending/descending sort
   // toggle") - both persisted client-side only, per docs/02-ARCHITECTURE.md's
@@ -239,6 +303,10 @@ const Tree = (() => {
     row.tabIndex = 0;
 
     row.addEventListener('dragstart', (event) => {
+      // Any state left over from a previous drag that ended without a
+      // `dragend` (see `endDrag`) is cleared here too, so a new drag never
+      // starts on top of a stale highlight or a stale `draggedEntry`.
+      endDrag();
       draggedEntry = entry;
       event.dataTransfer.effectAllowed = 'move';
       // Firefox requires *some* data to be set for the drag to proceed at
@@ -251,7 +319,7 @@ const Tree = (() => {
       // extremely fast drag, or a programmatic/assistive-tech-driven one,
       // could otherwise end *before* the next frame - leaving the class
       // added after cleanup already ran, and never removed again).
-      row._dragRafId = requestAnimationFrame(() => row.classList.add('tree-row-dragging'));
+      row._dragRafId = requestAnimationFrame(() => addDragFeedback(row, 'tree-row-dragging'));
     });
 
     row.addEventListener('dragend', () => {
@@ -259,8 +327,7 @@ const Tree = (() => {
         cancelAnimationFrame(row._dragRafId);
         row._dragRafId = null;
       }
-      row.classList.remove('tree-row-dragging');
-      draggedEntry = null;
+      endDrag();
     });
 
     row.addEventListener('contextmenu', (event) => {
@@ -285,14 +352,14 @@ const Tree = (() => {
   }
 
   /** True if `folderEntry` would be an invalid drop target for whatever's currently being dragged (its own current parent, itself, or one of its own descendants). Mirrors js/app.js's authoritative check - this copy only drives the *visual* drag-over feedback, so a false negative here is at worst a missing highlight, never an unwanted move (app.js always re-checks before calling the API). */
-  function isInvalidDropTarget(folderEntry) {
-    if (!draggedEntry) {
+  function isInvalidDropTarget(folderEntry, dragged = draggedEntry) {
+    if (!dragged) {
       return true;
     }
-    if (draggedEntry.type === 'folder' && (folderEntry.path === draggedEntry.path || folderEntry.path.startsWith(`${draggedEntry.path}/`))) {
+    if (dragged.type === 'folder' && (folderEntry.path === dragged.path || folderEntry.path.startsWith(`${dragged.path}/`))) {
       return true;
     }
-    const draggedParent = parentFolderOf(draggedEntry.path);
+    const draggedParent = parentFolderOf(dragged.path);
     return folderEntry.path === draggedParent;
   }
 
@@ -370,6 +437,7 @@ const Tree = (() => {
           row.classList.remove('tree-row-drop-target');
           row.classList.toggle('tree-row-reorder-before', zone === 'before');
           row.classList.toggle('tree-row-reorder-after', zone === 'after');
+          dragFeedbackNodes.add(row);
           row._reorderZone = zone;
           return;
         }
@@ -381,23 +449,36 @@ const Tree = (() => {
       }
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
-      row.classList.add('tree-row-drop-target');
+      addDragFeedback(row, 'tree-row-drop-target');
     });
-    row.addEventListener('dragleave', () => {
-      row.classList.remove('tree-row-drop-target', 'tree-row-reorder-before', 'tree-row-reorder-after');
-      row._reorderZone = null;
+    row.addEventListener('dragleave', (event) => {
+      // `dragleave` also fires when the pointer moves from the row onto
+      // one of its own children (the arrow/label spans). Ignoring those
+      // keeps the highlight steady instead of flickering off and back on
+      // with every pixel of movement across the row.
+      if (event.relatedTarget && row.contains(event.relatedTarget)) {
+        return;
+      }
+      clearRowDropFeedback(row);
     });
     row.addEventListener('drop', (event) => {
       event.preventDefault();
       const zone = row._reorderZone;
-      row.classList.remove('tree-row-drop-target', 'tree-row-reorder-before', 'tree-row-reorder-after');
-      row._reorderZone = null;
-      if (zone && draggedEntry) {
-        reorderFolder(parentFolderOf(entry.path), draggedEntry.path, entry.path, zone);
+      const dropped = draggedEntry;
+      clearRowDropFeedback(row);
+      if (!dropped) {
         return;
       }
-      if (draggedEntry && !isInvalidDropTarget(entry)) {
-        handlers.onMoveRequest(draggedEntry, entry.path);
+      // Both branches below replace tree DOM (and the move can also pop an
+      // error alert), so neither may run inside the drop dispatch - see
+      // `afterDragEvent`. `dropped` is captured above because `endDrag`
+      // will have cleared `draggedEntry` by the time these run.
+      if (zone) {
+        afterDragEvent(() => reorderFolder(parentFolderOf(entry.path), dropped.path, entry.path, zone));
+        return;
+      }
+      if (!isInvalidDropTarget(entry, dropped)) {
+        afterDragEvent(() => handlers.onMoveRequest(dropped, entry.path));
       }
     });
 
@@ -439,14 +520,25 @@ const Tree = (() => {
 
     document.addEventListener('dragstart', () => {
       if (draggedEntry) {
-        element.classList.add('tree-root-drop-hint-armed');
+        addDragFeedback(element, 'tree-root-drop-hint-armed');
         labelElement.textContent = 'Drop here to move to root';
       }
     });
-    document.addEventListener('dragend', () => {
-      element.classList.remove('tree-root-drop-hint-armed', 'tree-root-drop-hint-over');
+
+    // Both of these run on the *bubble* phase at the document, i.e. after
+    // whichever row handled the drop - so a row's own handler still sees
+    // `draggedEntry`. `drop` is listened for alongside `dragend` because a
+    // drop whose handler replaces the tree can detach the drag source
+    // before the browser gets to fire `dragend` on it at all; see
+    // `endDrag`. Running both is harmless (`endDrag` is idempotent) and
+    // means the drag visuals are never left behind - including when the
+    // move itself fails.
+    const finishDrag = () => {
+      endDrag();
       labelElement.textContent = defaultLabel;
-    });
+    };
+    document.addEventListener('dragend', finishDrag);
+    document.addEventListener('drop', finishDrag);
 
     element.addEventListener('dragover', (event) => {
       if (!draggedEntry || parentFolderOf(draggedEntry.path) === '') {
@@ -454,16 +546,22 @@ const Tree = (() => {
       }
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
-      element.classList.add('tree-root-drop-hint-over');
+      addDragFeedback(element, 'tree-root-drop-hint-over');
     });
-    element.addEventListener('dragleave', () => {
+    element.addEventListener('dragleave', (event) => {
+      if (event.relatedTarget && element.contains(event.relatedTarget)) {
+        return; // moved onto the hint's own icon/label, not out of it
+      }
       element.classList.remove('tree-root-drop-hint-over');
     });
     element.addEventListener('drop', (event) => {
       event.preventDefault();
       element.classList.remove('tree-root-drop-hint-over');
-      if (draggedEntry && currentHandlers) {
-        currentHandlers.onMoveRequest(draggedEntry, '');
+      const dropped = draggedEntry;
+      if (dropped && currentHandlers) {
+        // Deferred for the same reason as the folder rows' own drop
+        // handler - onMoveRequest rebuilds the tree.
+        afterDragEvent(() => currentHandlers.onMoveRequest(dropped, ''));
       }
     });
   }

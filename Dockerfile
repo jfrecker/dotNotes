@@ -9,6 +9,15 @@
 # baked into this image — it is always supplied at run time via a
 # mounted volume at /data/vault (see docker-compose.yml). A container
 # rebuild/recreate therefore never touches note data.
+#
+# Podman/Buildah build this file unchanged - `podman build` reads
+# `Dockerfile` natively, so there is deliberately no duplicate
+# `Containerfile` to keep in sync. Every base image below is written as
+# a fully-qualified name (mcr.microsoft.com/...), never a short name, so
+# Podman resolves it without the interactive registry-choice prompt that
+# short names trigger. The `# syntax=` line above is a BuildKit parser
+# directive that Buildah treats as a plain comment - harmless either
+# way. Nothing here uses Docker-only Dockerfile syntax.
 
 # ---- Build stage -----------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -58,6 +67,10 @@ COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # process via a non-loopback bind. Port matches Server:Port in
 # appsettings.json (informational there; this is what actually
 # controls the bound address/port).
+#
+# 5175 is deliberately well above 1024: rootless Podman cannot bind a
+# privileged port either inside the container or on the host side of a
+# published port, so nothing here ever needs extra capabilities.
 ENV ASPNETCORE_URLS=http://+:5175
 
 # Absolute, unambiguous in-container path so the compose file's bind

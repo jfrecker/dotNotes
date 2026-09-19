@@ -16,6 +16,7 @@ as needed by the frontend.
 | POST | `/api/notes/{**path}/move` | `{ destinationPath }` | `{ path, updatedAt, rewrittenNotes: [path] }` | Moves/renames a note (rename = move within the same folder). `404` if the source doesn't exist, `409` if `destinationPath` already exists (never overwrites), `400` for an invalid path or name |
 | POST | `/api/folders/{**path}` | — | `{ path }` | Creates a folder (and missing parent folders), `mkdir -p`-style. Idempotent — `200` even if it already exists. `409` if a *note* already exists at that exact path, `400` for an invalid path or name |
 | POST | `/api/folders/{**path}/move` | `{ destinationPath }` | `{ path, rewrittenNotes: [path] }` | Moves/renames a folder and everything inside it. `404` if the source doesn't exist, `409` if `destinationPath` already exists, `400` if the destination is the source itself or a descendant of it, or for an invalid path or name |
+| DELETE | `/api/folders/{**path}` | — | `204 No Content` | Deletes the folder and **everything inside it** (nested notes and subfolders, at any depth). `404` if no folder exists at that path (a *note* at that path is not deleted here — that's `DELETE /api/notes/{**path}`), `400` for an invalid path, including the vault root itself |
 
 - Both move endpoints **rewrite incoming `[[wikilinks]]`** that would
   otherwise break, and return the vault-relative paths of every note

@@ -123,6 +123,44 @@ public interface INoteRepository
     Task<string> CreateFolderAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes the folder at vault-relative <paramref name="path"/> and
+    /// everything inside it (nested notes, media, and subfolders at any
+    /// depth). Returns <see langword="false"/> (rather than throwing) if
+    /// no folder exists at that path - including when a *note* (a file)
+    /// sits there instead, which is <c>DELETE /api/notes/{**path}</c>'s
+    /// job and is never deleted through here. Backs
+    /// <c>DELETE /api/folders/{**path}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="MoveFolderAsync"/>, this needs no
+    /// <see cref="Reorganization.IVaultReorganizationService"/>
+    /// orchestration: a recursive directory delete removes each nested
+    /// file individually on disk, so <c>VaultWatcherService</c> sees a
+    /// per-file <c>Deleted</c> event for every note in the subtree and
+    /// reconciles the link/search indexes on its own - exactly as it does
+    /// for <see cref="DeleteAsync"/>. Nothing is rewritten in other notes:
+    /// per docs/06-DATA-MODEL.md a wikilink to a deleted note simply
+    /// becomes an unresolved link, same as deleting a single note.
+    /// <para>
+    /// The vault root itself can never be deleted through this method -
+    /// an empty/whitespace-only path is rejected as invalid, and every
+    /// resolved path is required to sit strictly *inside* the vault root
+    /// (see <see cref="MoveFolderAsync"/>'s remarks on path safety).
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidNotePathException">
+    /// <paramref name="path"/> is unsafe (see remarks on the interface),
+    /// or names the vault root itself.
+    /// </exception>
+    /// <exception cref="VaultUnavailableException">
+    /// The vault root directory does not currently exist on disk (see
+    /// remarks on that type) - deliberately distinct from a
+    /// <see langword="false"/> return, which means only this specific
+    /// folder doesn't exist.
+    /// </exception>
+    Task<bool> DeleteFolderAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Moves or renames the single note at <paramref name="sourcePath"/>
     /// to <paramref name="destinationPath"/>, auto-creating any missing
     /// destination parent folders (mirroring <see cref="SaveAsync"/>'s

@@ -139,6 +139,80 @@ public sealed class FileSystemNoteRepositoryTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(projectsDirectory));
     }
 
+    // ---- Folder delete (DELETE /api/folders/{**path}) ----
+
+    [Fact]
+    public async Task DeleteFolderAsync_EmptyFolder_RemovesItAndReturnsTrue()
+    {
+        await _repository.CreateFolderAsync("projects");
+
+        var deleted = await _repository.DeleteFolderAsync("projects");
+
+        Assert.True(deleted);
+        Assert.False(Directory.Exists(Path.Combine(_vaultDirectory.FullName, "projects")));
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_NonEmptyNestedFolder_RemovesTheWholeSubtree()
+    {
+        await _repository.SaveAsync("projects/idea.md", "content");
+        await _repository.SaveAsync("projects/archive/old/ancient.md", "content");
+
+        var deleted = await _repository.DeleteFolderAsync("projects");
+
+        Assert.True(deleted);
+        Assert.False(Directory.Exists(Path.Combine(_vaultDirectory.FullName, "projects")));
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_NestedFolder_LeavesItsParentAndSiblingsAlone()
+    {
+        await _repository.SaveAsync("projects/keep.md", "content");
+        await _repository.SaveAsync("projects/drop me/gone.md", "content");
+
+        var deleted = await _repository.DeleteFolderAsync("projects/drop me");
+
+        Assert.True(deleted);
+        Assert.False(Directory.Exists(Path.Combine(_vaultDirectory.FullName, "projects", "drop me")));
+        Assert.True(await _repository.ExistsAsync("projects/keep.md"));
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_ReturnsFalse_WhenFolderDoesNotExist()
+    {
+        Assert.False(await _repository.DeleteFolderAsync("missing"));
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_ReturnsFalse_AndKeepsTheFile_WhenPathIsANote()
+    {
+        await _repository.SaveAsync("idea.md", "content");
+
+        Assert.False(await _repository.DeleteFolderAsync("idea.md"));
+        Assert.True(await _repository.ExistsAsync("idea.md"));
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("projects/../../escape")]
+    [InlineData("/etc")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(".")]
+    public async Task DeleteFolderAsync_Throws_ForUnsafePathsAndTheVaultRoot(string maliciousPath)
+    {
+        await Assert.ThrowsAsync<InvalidNotePathException>(() => _repository.DeleteFolderAsync(maliciousPath));
+        Assert.True(Directory.Exists(_vaultDirectory.FullName));
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_Throws_WhenVaultRootHasVanished_RatherThanReturningFalse()
+    {
+        _vaultDirectory.Delete(recursive: true);
+
+        await Assert.ThrowsAsync<VaultUnavailableException>(() => _repository.DeleteFolderAsync("projects"));
+    }
+
     // ---- Tree listing ----
 
     [Fact]

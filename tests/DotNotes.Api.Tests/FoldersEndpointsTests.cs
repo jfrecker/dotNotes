@@ -6,7 +6,8 @@ namespace DotNotes.Api.Tests;
 
 /// <summary>
 /// Integration tests for docs/04-API-SPEC.md's folder-management rows:
-/// <c>POST /api/folders/{**path}</c> and <c>POST /api/folders/{**path}/move</c>,
+/// <c>POST /api/folders/{**path}</c>, <c>POST /api/folders/{**path}/move</c>
+/// and <c>DELETE /api/folders/{**path}</c>,
 /// exercised end-to-end through a real ASP.NET Core test host (see
 /// <see cref="NotesApiFactory"/>).
 /// </summary>
@@ -290,6 +291,124 @@ public sealed class FoldersEndpointsTests : IDisposable
         Assert.NotNull(error);
         Assert.Equal("vault_unavailable", error!.Error);
         Assert.False(Directory.Exists(_vaultRootPath));
+    }
+
+    // --- DELETE /api/folders/{**path} -----------------------------------
+
+    [Fact]
+    public async Task DeleteFolder_EmptyFolder_RemovesItAndReturnsNoContent()
+    {
+        Directory.CreateDirectory(Path.Combine(_vaultRootPath, "projects"));
+
+        var response = await _client.DeleteAsync("/api/folders/projects");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.False(Directory.Exists(Path.Combine(_vaultRootPath, "projects")));
+    }
+
+    [Fact]
+    public async Task DeleteFolder_NonEmptyNestedFolder_RemovesTheWholeSubtree()
+    {
+        WriteNoteToDisk("projects/idea.md", "# idea");
+        WriteNoteToDisk("projects/archive/old/ancient.md", "# ancient");
+
+        var response = await _client.DeleteAsync("/api/folders/projects");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.False(Directory.Exists(Path.Combine(_vaultRootPath, "projects")));
+    }
+
+    [Fact]
+    public async Task DeleteFolder_NestedPathWithSpaces_RemovesThatFolderOnly()
+    {
+        WriteNoteToDisk("my projects/deep folder/note.md", "# note");
+        WriteNoteToDisk("my projects/keep.md", "# keep");
+
+        var response = await _client.DeleteAsync("/api/folders/my%20projects/deep%20folder");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.False(Directory.Exists(Path.Combine(_vaultRootPath, "my projects", "deep folder")));
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "my projects", "keep.md")));
+    }
+
+    [Fact]
+    public async Task DeleteFolder_MissingFolder_ReturnsNotFound()
+    {
+        var response = await _client.DeleteAsync("/api/folders/nope");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorDto>(ResponseJsonOptions);
+        Assert.NotNull(error);
+        Assert.Equal("not_found", error!.Error);
+    }
+
+    [Fact]
+    public async Task DeleteFolder_PathIsANote_ReturnsNotFoundAndLeavesTheNoteAlone()
+    {
+        WriteNoteToDisk("idea.md", "# idea");
+
+        var response = await _client.DeleteAsync("/api/folders/idea.md");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "idea.md")));
+    }
+
+    /// <summary>
+    /// A <c>..</c> in the request URI never escapes the vault. Kestrel
+    /// normalizes dot segments out of the request path before routing, so
+    /// these requests arrive at the handler as a plain in-vault folder
+    /// name and 404 rather than reaching outside the root; the repository's
+    /// own <c>'.'</c>/<c>'..'</c>-segment rejection (covered directly in
+    /// FileSystemNoteRepositoryTests) is the second line of defence for
+    /// any caller that bypasses HTTP. Either way, what matters is asserted
+    /// here: nothing outside the vault root is touched.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/folders/%2E%2E/escape")]
+    [InlineData("/api/folders/projects/%2E%2E/%2E%2E/escape")]
+    public async Task DeleteFolder_TraversalPath_DeletesNothingOutsideTheVault(string url)
+    {
+        var outsideDirectory = Path.Combine(Path.GetDirectoryName(_vaultRootPath)!, "escape");
+        Directory.CreateDirectory(outsideDirectory);
+        try
+        {
+            var response = await _client.DeleteAsync(url);
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.True(Directory.Exists(outsideDirectory));
+        }
+        finally
+        {
+            Directory.Delete(outsideDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFolder_VaultRoot_IsRejectedAndLeavesTheVaultIntact()
+    {
+        WriteNoteToDisk("idea.md", "# idea");
+
+        var response = await _client.DeleteAsync("/api/folders/");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorDto>(ResponseJsonOptions);
+        Assert.NotNull(error);
+        Assert.Equal("invalid_path", error!.Error);
+        Assert.True(Directory.Exists(_vaultRootPath));
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "idea.md")));
+    }
+
+    [Fact]
+    public async Task DeleteFolder_VaultRootMissing_ReturnsServiceUnavailable()
+    {
+        Directory.Delete(_vaultRootPath, recursive: true);
+
+        var response = await _client.DeleteAsync("/api/folders/projects");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorDto>(ResponseJsonOptions);
+        Assert.NotNull(error);
+        Assert.Equal("vault_unavailable", error!.Error);
     }
 
     private void WriteNoteToDisk(string relativePath, string content)

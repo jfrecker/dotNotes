@@ -193,6 +193,38 @@ public sealed class FileSystemNoteRepository : INoteRepository
         return Task.FromResult(resolved.NormalizedRelativePath);
     }
 
+    public Task<bool> DeleteFolderAsync(string path, CancellationToken cancellationToken = default)
+    {
+        // ResolveFolderPath is the same choke point every other folder
+        // operation uses: it rejects absolute/drive-relative paths, '.'
+        // and '..' segments, and anything resolving outside the vault
+        // root. Because IsWithinVaultRoot compares against the root *with*
+        // a trailing separator, the vault root itself can never resolve
+        // here - and an empty path is rejected before that - so there is
+        // no path through this method that deletes the vault.
+        var resolved = ResolveFolderPath(path);
+
+        EnsureVaultRootExists();
+
+        if (!Directory.Exists(resolved.FullPath))
+        {
+            // Also the "a note, not a folder, lives here" case: deleting
+            // a note is DELETE /api/notes/{**path}'s job, never this one.
+            return Task.FromResult(false);
+        }
+
+        // recursive: true - a folder is deleted with everything inside it
+        // (nested notes, subfolders, media). Directory.Delete without it
+        // throws IOException for any non-empty folder, which is the whole
+        // point of this operation.
+        Directory.Delete(resolved.FullPath, recursive: true);
+
+        // Deliberately does NOT walk up and remove now-empty parent
+        // folders, for the same reason DeleteAsync doesn't - see its
+        // comment and docs/06-DATA-MODEL.md.
+        return Task.FromResult(true);
+    }
+
     public Task<NoteWriteResult> MoveAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
     {
         var source = ResolveNotePath(sourcePath);

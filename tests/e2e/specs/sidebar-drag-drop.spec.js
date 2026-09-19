@@ -81,4 +81,82 @@ test.describe('Sidebar drag-and-drop', () => {
 
     await api.deleteTree(root);
   });
+
+  // Regression: a drop handler that rebuilt the tree *synchronously*
+  // detached the drag source mid-drop, so the browser never fired
+  // `dragend` on it. `draggedEntry` and every drag-feedback class then
+  // stayed set for the rest of the page's life, and the browser's own
+  // drag session was left unterminated - which is what made the sidebar
+  // stop responding after dragging a folder (js/tree.js's `endDrag`).
+  test('a folder reorder drop ends the drag cleanly - no leftover drag state', async ({ page, api }) => {
+    const root = uniqueName('dnd-drag-state');
+    for (const name of ['sub-a', 'sub-b', 'sub-c']) {
+      await api.createFolder(`${root}/${name}`);
+    }
+
+    await page.goto('/');
+    const rootRow = page.locator(`#file-tree [data-path="${root}"]`);
+    await expect(rootRow).toBeVisible();
+    await rootRow.click(); // expand
+
+    await page.evaluate(() => {
+      window.__dragEnded = false;
+      document.addEventListener('dragend', () => { window.__dragEnded = true; });
+    });
+
+    // Drop onto sub-a's top edge: the reorder path, the one that redraws
+    // the tree from inside the drop.
+    const subARow = page.locator(`#file-tree [data-path="${root}/sub-a"]`);
+    const box = await subARow.boundingBox();
+    await page
+      .locator(`#file-tree [data-path="${root}/sub-c"]`)
+      .dragTo(subARow, { targetPosition: { x: 5, y: Math.max(1, Math.floor(box.height * 0.1)) } });
+
+    await expect.poll(() => page.evaluate(() => window.__dragEnded)).toBe(true);
+    // Every drag-feedback class is gone, including the root drop zone's
+    // armed state and its swapped-out label.
+    await expect(page.locator('#tree-root-drop-zone')).not.toHaveClass(/tree-root-drop-hint-(armed|over)/);
+    await expect(page.locator('#tree-root-drop-label')).toHaveText('Drag = Move');
+    await expect(
+      page.locator('.tree-row-dragging, .tree-row-drop-target, .tree-row-reorder-before, .tree-row-reorder-after'),
+    ).toHaveCount(0);
+    // And the page is still interactive: a plain click still expands.
+    await rootRow.click();
+    await expect(rootRow).toHaveAttribute('aria-expanded', 'false');
+
+    await api.deleteTree(root);
+  });
+
+  test('a name collision at the destination is refused with the backend\'s message, and nothing moves', async ({
+    page,
+    api,
+  }) => {
+    const root = uniqueName('dnd-collision');
+    await api.saveNote(`${root}/dupe/keep.md`, '# original');
+    await api.createFolder(`${root}/dest/dupe`);
+
+    await page.goto('/');
+    const rootRow = page.locator(`#file-tree [data-path="${root}"]`);
+    await expect(rootRow).toBeVisible();
+    await rootRow.click();
+
+    const messages = [];
+    page.on('dialog', (dialog) => {
+      messages.push(dialog.message());
+      dialog.dismiss();
+    });
+
+    await page
+      .locator(`#file-tree [data-path="${root}/dupe"]`)
+      .dragTo(page.locator(`#file-tree [data-path="${root}/dest"]`));
+
+    await expect.poll(() => messages.length).toBe(1);
+    expect(messages[0]).toContain('already exists');
+    // The note is still where it started - the move really was refused,
+    // not just reported as refused.
+    const note = await (await page.request.get(`/api/notes/${root}/dupe/keep.md`)).json();
+    expect(note.content).toBe('# original');
+
+    await api.deleteTree(root);
+  });
 });

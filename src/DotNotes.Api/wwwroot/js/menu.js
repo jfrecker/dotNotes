@@ -71,7 +71,9 @@ const Menu = (() => {
    *   returnFocusEl?: HTMLElement - focused again once the menu closes,
    *   onClose？: () => void - e.g. to reset a trigger button's aria-expanded,
    *   items: Array<{ id?: string, label: string, icon?: string (inline SVG
-   *     markup), disabled?: boolean, onSelect?: () => void } | { separator: true }>
+   *     markup), disabled?: boolean, danger?: boolean (a destructive
+   *     action, e.g. Delete - rendered in the danger color), onSelect?:
+   *     () => void } | { separator: true }>
    * }} options
    */
   function open({ x, y, align = 'left', id, ariaLabel, returnFocusEl, onClose, items }) {
@@ -109,6 +111,9 @@ const Menu = (() => {
       if (item.disabled) {
         btn.disabled = true;
         btn.setAttribute('aria-disabled', 'true');
+      }
+      if (item.danger) {
+        btn.classList.add('app-menu-item-danger');
       }
       if (item.icon) {
         const iconEl = document.createElement('span');

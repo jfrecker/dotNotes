@@ -1,0 +1,89 @@
+# dotNotes as a systemd service, via a Podman Quadlet unit.
+#
+# Quadlet turns a `.container` file into a generated systemd service at
+# boot/daemon-reload time, so there is no `podman generate systemd` step
+# to re-run whenever the container changes, and no docker-compose
+# equivalent to keep alongside it.
+#
+# --- Install (rootless - recommended for a personal vault) -------------
+#
+#   mkdir -p ~/.config/containers/systemd
+#   cp deploy/podman/dotnotes.container ~/.config/containers/systemd/
+#   # edit the Image= and Volume= lines below for your machine, then:
+#   systemctl --user daemon-reload
+#   systemctl --user start dotnotes
+#   systemctl --user status dotnotes
+#
+# For the service to keep running when you are not logged in (and to
+# start at boot rather than at first login):
+#
+#   loginctl enable-linger "$USER"
+#
+# --- Install (rootful) -------------------------------------------------
+#
+#   sudo cp deploy/podman/dotnotes.container /etc/containers/systemd/
+#   # drop the UserNS= line below - it is rootless-only - then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl start dotnotes
+#
+# --- Build the image first ---------------------------------------------
+#
+# Quadlet runs an image, it does not build one. From the repo root:
+#
+#   podman build -t localhost/dotnotes:latest .
+#
+# See README.md's "Running with Podman" for the full walkthrough,
+# including updating and troubleshooting.
+
+[Unit]
+Description=dotNotes - self-hosted markdown notes
+Documentation=https://github.com/jfrecker/dotNotes
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Locally built by `podman build -t localhost/dotnotes:latest .` — a
+# fully-qualified name (localhost/...) so Podman never prompts for a
+# registry to resolve a short name against.
+Image=localhost/dotnotes:latest
+ContainerName=dotnotes
+
+# Host:container. 5175 is unprivileged on both sides, so rootless
+# Podman can publish it without extra capabilities or sysctl changes.
+PublishPort=5175:5175
+
+# The vault. Change the host-side path to wherever your notes live.
+#
+#   :Z  relabels the directory for this container alone (needed on
+#       SELinux-enforcing hosts: Fedora, RHEL, CentOS Stream). Use :z
+#       instead if another container mounts the same path. Both are
+#       accepted and ignored on non-SELinux hosts, so leaving :Z here is
+#       safe everywhere — but note it does rewrite SELinux labels on the
+#       directory, so keep it one dedicated to dotNotes.
+#   U   tells Podman to chown the volume's contents to the uid the
+#       container runs as, which with UserNS=keep-id below is your own
+#       host user.
+Volume=%h/dotnotes/vault:/data/vault:Z,U
+
+# Rootless only — maps your host user straight through, so notes written
+# into the vault are owned by *you* on the host rather than by a
+# subordinate uid you would need `podman unshare` to touch. Delete this
+# line for a rootful install (and set Environment=PUID=... PGID=...
+# there instead if you want the files owned by a specific host user).
+UserNS=keep-id
+
+Environment=Vault__RootPath=/data/vault
+Environment=Server__Port=5175
+Environment=Sharing__Enabled=true
+Environment=Mcp__Enabled=true
+
+[Service]
+Restart=always
+# The first start also pulls/creates; give it room before systemd calls
+# it a failure.
+TimeoutStartSec=120
+
+[Install]
+# `systemctl --user enable dotnotes` is not used with Quadlet — the unit
+# is generated, so it is enabled by this section at daemon-reload time.
+WantedBy=default.target
