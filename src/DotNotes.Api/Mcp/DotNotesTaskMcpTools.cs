@@ -37,7 +37,8 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
         [Description("Filter by assignee, e.g. '@jonathan'.")] string? assignee = null,
         [Description("Filter by priority, e.g. 'high'.")] string? priority = null,
         [Description("Filter by milestone.")] string? milestone = null,
-        [Description("Include archived tasks (default false).")] bool includeArchived = false,
+        [Description("Include completed tasks (default false).")] bool includeCompleted = false,
+        [Description("Deprecated alias of includeCompleted.")] bool includeArchived = false,
         [Description("Maximum number of results to return.")] int? limit = null)
     {
         var filter = new TaskFilter
@@ -47,7 +48,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
             Assignee = assignee,
             Priority = priority,
             Milestone = milestone,
-            IncludeArchived = includeArchived,
+            IncludeCompleted = includeCompleted || includeArchived,
         };
 
         var tasks = taskService.List(filter);
@@ -80,6 +81,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
         [Description("Milestone.")] string? milestone = null,
         [Description("Ids of tasks this depends on, e.g. ['TASK-3'].")] IReadOnlyList<string>? dependencies = null,
         [Description("Acceptance criteria as testable outcome statements; all start unchecked.")] IReadOnlyList<string>? acceptanceCriteria = null,
+        [Description("Vault-relative folder to create the task's note under; defaults to the configured tasks folder (e.g. 'Task'). Can be a subfolder, e.g. 'Task/ProjectX'.")] string? folder = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -96,6 +98,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
                     Milestone = milestone,
                     Dependencies = dependencies,
                     AcceptanceCriteria = acceptanceCriteria,
+                    Folder = folder,
                 },
                 cancellationToken).ConfigureAwait(false);
 
@@ -182,15 +185,32 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
         }
     }
 
+    [McpServerTool(Name = "complete_task")]
+    [Description("Mark a task complete: sets its status to the completed status and moves its note into a Completed subfolder next to its current location. It disappears from get_board/list_tasks unless includeCompleted is set.")]
+    public async Task<TaskDto> CompleteTask(
+        [Description("Task id, e.g. 'TASK-12'.")] string id,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var task = await taskService.CompleteAsync(id, cancellationToken).ConfigureAwait(false);
+            return ToDto(task);
+        }
+        catch (Exception ex) when (IsExpectedFailure(ex))
+        {
+            throw ToMcpException(ex);
+        }
+    }
+
     [McpServerTool(Name = "archive_task")]
-    [Description("Archive a task (moves its note under the tasks folder's archive subfolder). Use only for duplicates or cancelled work - completed work should be moved to a Done-like status with move_task instead.")]
+    [Description("Deprecated alias of complete_task - use complete_task instead. Marks a task complete: sets its status to the completed status and moves its note into a Completed subfolder next to its current location.")]
     public async Task<TaskDto> ArchiveTask(
         [Description("Task id, e.g. 'TASK-12'.")] string id,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var task = await taskService.ArchiveAsync(id, cancellationToken).ConfigureAwait(false);
+            var task = await taskService.CompleteAsync(id, cancellationToken).ConfigureAwait(false);
             return ToDto(task);
         }
         catch (Exception ex) when (IsExpectedFailure(ex))
@@ -200,7 +220,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
     }
 
     [McpServerTool(Name = "get_board")]
-    [Description("Get the kanban board: one column per configured status, in configured order, plus a trailing column for any status in use that isn't configured. Use this to discover the valid status names for create_task/update_task/move_task.")]
+    [Description("Get the kanban board: one column per configured status, Backlog first. Tasks with an empty or unrecognised status land in the Backlog column rather than a trailing column of their own. Use this to discover the valid status names for create_task/update_task/move_task.")]
     public BoardDto GetBoard(
         [Description("Filter by exact status name.")] string? status = null,
         [Description("Filter by label.")] string? label = null,
@@ -219,7 +239,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
 
         var board = taskService.GetBoard(filter);
         var columns = board.Columns
-            .Select(c => new BoardColumnDto(c.Status, c.Tasks.Select(ToSummary).ToArray()))
+            .Select(c => new BoardColumnDto(c.Status, c.Tasks.Select(ToSummary).ToArray(), c.IsBacklog))
             .ToArray();
 
         return new BoardDto(columns);
@@ -229,10 +249,12 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
     [Description("Search tasks by id, title, description, labels or assignee. Call this (or list_tasks) before create_task to avoid creating a duplicate.")]
     public IReadOnlyList<TaskSummaryDto> SearchTasks(
         [Description("Search text.")] string query,
-        [Description("Maximum number of results to return (default 10).")] int limit = DefaultSearchLimit)
+        [Description("Maximum number of results to return (default 10).")] int limit = DefaultSearchLimit,
+        [Description("Include completed tasks (default false).")] bool includeCompleted = false,
+        [Description("Deprecated alias of includeCompleted.")] bool includeArchived = false)
     {
         var effectiveLimit = limit > 0 ? limit : DefaultSearchLimit;
-        return taskService.Search(query, effectiveLimit).Select(ToSummary).ToArray();
+        return taskService.Search(query, effectiveLimit, includeCompleted || includeArchived).Select(ToSummary).ToArray();
     }
 
     [McpServerTool(Name = "get_task_workflow")]
@@ -273,7 +295,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
         task.UpdatedDate,
         task.Ordinal,
         task.Path,
-        task.Archived,
+        task.Completed,
         task.Excerpt,
         task.AcceptanceCriteria.Count,
         task.AcceptanceCriteria.Count(ac => ac.Checked));
@@ -291,7 +313,7 @@ public sealed class DotNotesTaskMcpTools(ITaskService taskService)
         task.UpdatedDate,
         task.Ordinal,
         task.Path,
-        task.Archived,
+        task.Completed,
         task.Excerpt,
         task.AcceptanceCriteria.Count,
         task.AcceptanceCriteria.Count(ac => ac.Checked),
@@ -323,7 +345,7 @@ public sealed record TaskSummaryDto(
     DateTimeOffset? UpdatedDate,
     double? Ordinal,
     string Path,
-    bool Archived,
+    bool Completed,
     string Excerpt,
     int AcTotal,
     int AcChecked);
@@ -347,7 +369,7 @@ public sealed record TaskDto(
     DateTimeOffset? UpdatedDate,
     double? Ordinal,
     string Path,
-    bool Archived,
+    bool Completed,
     string Excerpt,
     int AcTotal,
     int AcChecked,
@@ -359,7 +381,7 @@ public sealed record TaskDto(
     DateTimeOffset UpdatedAt);
 
 /// <summary>Backs one <c>get_board</c> column: <c>{ status, tasks }</c>.</summary>
-public sealed record BoardColumnDto(string Status, IReadOnlyList<TaskSummaryDto> Tasks);
+public sealed record BoardColumnDto(string Status, IReadOnlyList<TaskSummaryDto> Tasks, bool IsBacklog);
 
 /// <summary>Backs <c>get_board</c>'s <c>{ columns: [...] }</c> response.</summary>
 public sealed record BoardDto(IReadOnlyList<BoardColumnDto> Columns);

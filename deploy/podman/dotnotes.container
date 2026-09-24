@@ -76,7 +76,9 @@ Environment=Vault__RootPath=/data/vault
 Environment=Server__Port=5175
 Environment=Sharing__Enabled=true
 Environment=Mcp__Enabled=true
-Environment=Tasks__Folder=tasks
+# v0.2.1 renamed the default Tasks folder from `tasks` to `Task`; a
+# one-time startup migration moves any existing `task`/`tasks` folder in.
+Environment=Tasks__Folder=Task
 Environment=Tasks__IdPrefix=TASK
 
 [Service]

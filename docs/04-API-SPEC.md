@@ -115,28 +115,30 @@ as needed by the frontend.
 
 ## Tasks
 
-A task is a note recognised by its frontmatter (`id` + `status`), not by
-location — see docs/features/tasks-kanban/PLAN.md §2. `{id}` is a task id
-(e.g. `TASK-12`), matched case-insensitively.
+A task is a note recognised by its frontmatter (`id` + a `status` key,
+value may be empty), not by location — see
+docs/features/tasks-kanban/PLAN.md §2. `{id}` is a task id (e.g.
+`TASK-12`), matched case-insensitively.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| GET | `/api/tasks/config` | — | `{ folder, idPrefix, statuses: [string], defaultStatus, priorities: [string] }` — `defaultStatus` is resolved (`Tasks:DefaultStatus` or the first configured status) |
-| GET | `/api/tasks` | query `status,label,assignee,priority,milestone,q,includeArchived` | `{ revision, tasks: TaskSummary[] }` |
+| GET | `/api/tasks/config` | — | `{ folder, idPrefix, statuses: [string], defaultStatus, backlogStatus, completedStatus, completedFolder, priorities: [string] }` — `defaultStatus` is resolved (`Tasks:DefaultStatus` or the first effective status, i.e. `backlogStatus`); `statuses` is the effective list with `backlogStatus` always first; `completedFolder` is always `"Completed"` |
+| GET | `/api/tasks` | query `status,label,assignee,priority,milestone,q,includeCompleted` (`includeArchived` accepted as a deprecated alias) | `{ revision, tasks: TaskSummary[] }` |
 | GET | `/api/tasks/revision` | — | `{ revision }` — poll this for live-refresh (docs/features/tasks-kanban/PLAN.md's "Live updates") |
-| GET | `/api/tasks/board` | same filters as `GET /api/tasks` | `{ revision, columns: [{ status, tasks: TaskSummary[] }] }` |
+| GET | `/api/tasks/board` | same filters as `GET /api/tasks` | `{ revision, columns: [{ status, isBacklog, tasks: TaskSummary[] }] }` |
 | GET | `/api/tasks/{id}` | — | `Task`. `404` if no task exists with that id |
-| POST | `/api/tasks` | `TaskCreate` | `201 Task` with a `Location: /api/tasks/{id}` header. `400` for a missing/empty `title` or an unconfigured `status`/`priority` |
+| POST | `/api/tasks` | `TaskCreate` | `201 Task` with a `Location: /api/tasks/{id}` header. `400` for a missing/empty `title`, an unconfigured `status`/`priority`, or a `folder` inside an existing `Completed` folder |
 | PATCH | `/api/tasks/{id}` | `TaskPatch` | `Task`. `404` if no task exists with that id, `400` for an invalid patch (e.g. empty `title`, unconfigured `status`/`priority`) |
-| POST | `/api/tasks/{id}/move` | `{ status, index?, beforeId? }` | `Task`. `400` if `status` is missing/empty or unknown, `index` is negative, or `beforeId` isn't another active task in the destination column; `404` if no task exists with that id |
-| POST | `/api/tasks/{id}/archive` | — | `Task` (moved under `<Tasks:Folder>/archive/`). Idempotent — archiving an already-archived task just returns it. `404` if no task exists with that id |
+| POST | `/api/tasks/{id}/move` | `{ status, index?, beforeId? }` | `Task`. `400` if `status` is missing/empty or unknown, `index` is negative, or `beforeId` isn't another active task in the destination column; `404` if no task exists with that id. Moving to the Backlog column sets `status` to `backlogStatus` unless the task is already in the Backlog column (a same-column reorder keeps its raw status) |
+| POST | `/api/tasks/{id}/complete` | — | `Task` (status set to `completedStatus`; note moved to a `Completed` subfolder next to it, e.g. `Task/ProjectX/Completed/`, created if missing, `" (2)"`-suffixed on a name collision). Idempotent — completing an already-completed task just ensures the status. `404` if no task exists with that id |
+| POST | `/api/tasks/{id}/archive` | — | **Deprecated alias** for `POST /api/tasks/{id}/complete` — same behavior, response, and status codes |
 | POST | `/api/tasks/convert` | `{ path, status? }` | `Task`. `404` if no note exists at `path`, `400` if it's already a task |
 
-- `TaskSummary`: `{ id, title, status, assignee: [string], labels: [string], priority, milestone, dependencies: [string], createdDate, updatedDate, ordinal, path, archived, excerpt, acTotal, acChecked }` — `path` is vault-relative, `excerpt` is the first ~160 characters of the description as plain text, `acTotal`/`acChecked` summarize the acceptance-criteria checklist.
+- `TaskSummary`: `{ id, title, status, assignee: [string], labels: [string], priority, milestone, dependencies: [string], createdDate, updatedDate, ordinal, path, completed, excerpt, acTotal, acChecked }` — `path` is vault-relative, `completed` is true when the task's path is under any folder segment named exactly `Completed` (case-sensitive; replaces v0.2.0's `archived` field), `excerpt` is the first ~160 characters of the description as plain text, `acTotal`/`acChecked` summarize the acceptance-criteria checklist.
 - `Task` = `TaskSummary` + `{ description, acceptanceCriteria: [{ index, text, checked }], implementationPlan, implementationNotes, finalSummary, updatedAt }` — `updatedAt` is the note file's last-write timestamp (distinct from `updatedDate`, the frontmatter field), usable as `expectedUpdatedAt` on a subsequent `PUT /api/notes/{**path}`.
-- `TaskCreate`: `{ title (required), status?, description?, assignee?: [string], labels?: [string], priority?, milestone?, dependencies?: [string], acceptanceCriteria?: [string], folder? }`. `folder` defaults to the configured `Tasks:Folder`.
+- `TaskCreate`: `{ title (required), status?, description?, assignee?: [string], labels?: [string], priority?, milestone?, dependencies?: [string], acceptanceCriteria?: [string], folder? }`. `folder` defaults to the configured `Tasks:Folder`; blank `status` defaults to the Backlog column's status.
 - `TaskPatch`: every field optional — absent/`null` leaves it unchanged; `""` clears a scalar field (`priority`, `milestone`, `description`, `implementationPlan`, `implementationNotes`, `finalSummary`); array fields (`assignee`, `labels`, `dependencies`) fully replace when present; `acceptanceCriteria: [{ text, checked }]` fully replaces the checklist (renumbered `1..n`); `{ title, status, priority, milestone, dependencies, description, acceptanceCriteria, implementationPlan, implementationNotes, finalSummary, ordinal }`.
-- `index` on `POST /api/tasks/{id}/move` is the 0-based target position among the destination column's *other* (non-archived) tasks; absent means "end"; negative is `400`. `beforeId` is the id of another active task in the destination column: the moved task is inserted immediately before it, and it **takes precedence over `index`** (a positional index is ambiguous when the client shows a filtered column, so filtered views should send `beforeId`). Moving a task to where it already is (same status and position) is a no-op that writes nothing. The destination `status` may be a configured status, the task's own current status, or a status some task already holds (the board shows those as extra columns); other unknown statuses are `400`.
+- `index` on `POST /api/tasks/{id}/move` is the 0-based target position among the destination column's *other* (non-completed) tasks; absent means "end"; negative is `400`. `beforeId` is the id of another active task in the destination column: the moved task is inserted immediately before it, and it **takes precedence over `index`** (a positional index is ambiguous when the client shows a filtered column, so filtered views should send `beforeId`). Moving a task to where it already is (same status/column and position) is a no-op that writes nothing. The destination `status` may be a configured status, `backlogStatus` (the Backlog column), or the task's own current status re-supplied as-is (moving a task to its own unrecognised raw status is a Backlog-column reorder: it stays classified in the Backlog column, keeps that raw status, and honours `index`/`beforeId` there); any other unknown status is `400`.
 - Single-line frontmatter values (`title`, `labels`, `assignee`, `milestone`, `dependencies`) have any run of line-break/tab/control characters collapsed to one space and are trimmed; empty list items are dropped, and a `title` that normalises to empty is `400`.
 - Renaming a task's `title` (via create or `PATCH`) renames its note file to `<id> - <title>.md`, rewriting incoming `[[wikilinks]]`, the same as `POST /api/notes/{**path}/move` — unless the file was already manually renamed away from that convention, in which case it's left alone.
 - Statuses/id prefix/folder/priorities are server config (`Tasks:*` in appsettings/env), not settable per-request — see `GET /api/tasks/config`.
@@ -145,7 +147,7 @@ location — see docs/features/tasks-kanban/PLAN.md §2. `{id}` is a task id
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/config` | `{ name, version, features: { sharing, mcp, graph, tasks }, autosaveDelayMs }` — `version` is the app's release version (e.g. `"0.2.0"`) |
+| GET | `/api/config` | `{ name, version, features: { sharing, mcp, graph, tasks }, autosaveDelayMs }` — `version` is the app's release version (e.g. `"0.2.1"`) |
 
 ## Conventions
 

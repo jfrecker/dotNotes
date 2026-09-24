@@ -59,8 +59,8 @@ public sealed class TaskEdgeCaseTests : IDisposable
             "\r\n## Definition of Done\r\n- reviewed\r\n";
 
         // Write the raw bytes ourselves so nothing normalises the line endings.
-        Directory.CreateDirectory(DiskPath("tasks"));
-        await File.WriteAllTextAsync(DiskPath("tasks/TASK-7 - Legacy task.md"), crlf, new System.Text.UTF8Encoding(false));
+        Directory.CreateDirectory(DiskPath("Task"));
+        await File.WriteAllTextAsync(DiskPath("Task/TASK-7 - Legacy task.md"), crlf, new System.Text.UTF8Encoding(false));
         await _taskIndex.RebuildAsync();
 
         var task = _service.GetById("TASK-7");
@@ -79,7 +79,7 @@ public sealed class TaskEdgeCaseTests : IDisposable
         Assert.Equal(new[] { false, true }, updated.AcceptanceCriteria.Select(c => c.Checked).ToArray());
         Assert.Equal("Old description", updated.Description.Trim());
 
-        var onDisk = await File.ReadAllTextAsync(DiskPath("tasks/TASK-7 - Legacy task.md"));
+        var onDisk = await File.ReadAllTextAsync(DiskPath("Task/TASK-7 - Legacy task.md"));
         Assert.StartsWith("﻿---\n", onDisk);
         Assert.Contains("custom_key: keep me", onDisk);
         Assert.Contains("## Definition of Done", onDisk);
@@ -115,7 +115,7 @@ public sealed class TaskEdgeCaseTests : IDisposable
         var reloaded = _service.GetById(created.Id);
         Assert.NotNull(reloaded);
         Assert.Equal(title, reloaded!.Title);
-        Assert.Equal("To Do", reloaded.Status);
+        Assert.Equal("Backlog", reloaded.Status);
     }
 
     [Fact]
@@ -187,10 +187,10 @@ public sealed class TaskEdgeCaseTests : IDisposable
     [Fact]
     public async Task DuplicateIdsAcrossTwoFiles_BothListed_NewIdsStillUnique_AndUpdateTouchesExactlyOne()
     {
-        Directory.CreateDirectory(DiskPath("tasks"));
+        Directory.CreateDirectory(DiskPath("Task"));
         const string template = "---\nid: TASK-5\ntitle: {0}\nstatus: To Do\nordinal: {1}\n---\nbody {0}\n";
-        await File.WriteAllTextAsync(DiskPath("tasks/TASK-5 - First copy.md"), string.Format(template, "First copy", 1000));
-        await File.WriteAllTextAsync(DiskPath("tasks/TASK-5 - Second copy.md"), string.Format(template, "Second copy", 2000));
+        await File.WriteAllTextAsync(DiskPath("Task/TASK-5 - First copy.md"), string.Format(template, "First copy", 1000));
+        await File.WriteAllTextAsync(DiskPath("Task/TASK-5 - Second copy.md"), string.Format(template, "Second copy", 2000));
         await _taskIndex.RebuildAsync();
 
         // Documented behaviour: both files are real tasks and both show up
@@ -206,12 +206,12 @@ public sealed class TaskEdgeCaseTests : IDisposable
 
         // A patch through the id changes exactly one of the two files; the
         // other file's bytes must be untouched.
-        var before1 = await File.ReadAllTextAsync(DiskPath("tasks/TASK-5 - First copy.md"));
-        var before2 = await File.ReadAllTextAsync(DiskPath("tasks/TASK-5 - Second copy.md"));
+        var before1 = await File.ReadAllTextAsync(DiskPath("Task/TASK-5 - First copy.md"));
+        var before2 = await File.ReadAllTextAsync(DiskPath("Task/TASK-5 - Second copy.md"));
         var target = _service.GetById("TASK-5")!;
         await _service.UpdateAsync("TASK-5", new TaskUpdate { Priority = "high" });
-        var after1 = await File.ReadAllTextAsync(DiskPath("tasks/TASK-5 - First copy.md"));
-        var after2 = await File.ReadAllTextAsync(DiskPath("tasks/TASK-5 - Second copy.md"));
+        var after1 = await File.ReadAllTextAsync(DiskPath("Task/TASK-5 - First copy.md"));
+        var after2 = await File.ReadAllTextAsync(DiskPath("Task/TASK-5 - Second copy.md"));
 
         var changed = new[] { before1 != after1, before2 != after2 };
         Assert.Single(changed, c => c);
@@ -224,11 +224,11 @@ public sealed class TaskEdgeCaseTests : IDisposable
     public async Task UnicodeTitle_CreatesReadableFileName_AndRenamesToAnotherUnicodeTitle()
     {
         var created = await _service.CreateAsync(new TaskCreateRequest { Title = "Café ☕ 日本語 задача" });
-        Assert.Equal("tasks/TASK-1 - Café ☕ 日本語 задача.md", created.Path);
+        Assert.Equal("Task/TASK-1 - Café ☕ 日本語 задача.md", created.Path);
         Assert.True(File.Exists(DiskPath(created.Path)));
 
         var renamed = await _service.UpdateAsync(created.Id, new TaskUpdate { Title = "Über 任務" });
-        Assert.Equal("tasks/TASK-1 - Über 任務.md", renamed.Path);
+        Assert.Equal("Task/TASK-1 - Über 任務.md", renamed.Path);
         Assert.True(File.Exists(DiskPath(renamed.Path)));
         Assert.False(File.Exists(DiskPath(created.Path)));
     }
@@ -267,7 +267,7 @@ public sealed class TaskEdgeCaseTests : IDisposable
         var ids = new List<string>();
         foreach (var name in new[] { "A", "B", "C" })
         {
-            ids.Add((await _service.CreateAsync(new TaskCreateRequest { Title = name })).Id);
+            ids.Add((await _service.CreateAsync(new TaskCreateRequest { Title = name, Status = "To Do" })).Id);
         }
 
         // Rotate the last card to the top 45 times: each move halves the top
@@ -366,6 +366,6 @@ public sealed class TaskEdgeCaseTests : IDisposable
             .Select(i => Task.Run(() => _service.CreateAsync(new TaskCreateRequest { Title = $"Parallel {i}" }))));
 
         Assert.Equal(15, created.Select(t => t.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.Equal(15, Directory.GetFiles(DiskPath("tasks"), "*.md").Length);
+        Assert.Equal(15, Directory.GetFiles(DiskPath("Task"), "*.md").Length);
     }
 }

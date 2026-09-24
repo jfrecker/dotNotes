@@ -24,6 +24,7 @@
   const renameModalDescriptionEl = document.getElementById('rename-modal-description');
   const renameModalFieldEl = document.getElementById('rename-modal-field');
   const renameModalLabelEl = document.getElementById('rename-modal-label');
+  const renameModalLockedPrefixEl = document.getElementById('rename-modal-locked-prefix');
   const renameModalInputEl = document.getElementById('rename-modal-input');
   const renameModalErrorEl = document.getElementById('rename-modal-error');
   const renameModalConfirmBtn = document.getElementById('rename-modal-confirm-btn');
@@ -223,7 +224,7 @@
         const closeNote = await Modal.confirm({
           title: 'This note was moved or deleted elsewhere',
           description:
-            'The note no longer exists at this path (it was renamed, moved, archived or deleted from the Kanban board, an AI assistant, or another tab), so your latest edits could not be saved. Close the note, or keep this editor open to copy your text out first.',
+            'The note no longer exists at this path (it was renamed, moved, completed or deleted from the Kanban board, an AI assistant, or another tab), so your latest edits could not be saved. Close the note, or keep this editor open to copy your text out first.',
           confirmLabel: 'Close note',
           cancelLabel: 'Keep editing',
           danger: true,
@@ -307,7 +308,7 @@
   /**
    * Opens `path` in the editor. `keepView: true` loads it into the (hidden)
    * editor without switching away from the Kanban board/list - used when a
-   * task-file change (rename/archive/convert) means the editor's file moved
+   * task-file change (rename/complete/convert) means the editor's file moved
    * while a task view is showing.
    */
   async function selectFile(path, { keepView = false } = {}) {
@@ -348,7 +349,7 @@
 
   /**
    * Called by js/tasks.js around a task-file change (convert / rename /
-   * archive / modal save). Before the change, flush the editor if it has
+   * complete / modal save). Before the change, flush the editor if it has
    * this file open so no edit is lost; after it, reload the editor onto
    * `newPath` (the same path when only the content changed) so it never sits
    * on a dead path or stale `updatedAt`.
@@ -714,6 +715,35 @@
     }
   }
 
+  /**
+   * "New Note" from a folder's right-click menu (v0.2.1): the folder is
+   * fixed (shown as a locked prefix chip - see `Modal.open`'s
+   * `lockedPrefix`), so the prompt only collects the note's own name
+   * (reusing `validateEntryName`'s no-slashes rule, same as Rename).
+   */
+  async function createNewNoteInFolder(folder) {
+    const name = await Modal.prompt({
+      title: 'New Note',
+      description: 'Enter a name for the new note.',
+      label: 'Name',
+      lockedPrefix: folder,
+      confirmLabel: 'Create',
+      validate: (raw) => {
+        const validated = validateEntryName(raw);
+        return validated.ok ? { ok: true, value: validated.name } : { ok: false, message: validated.message };
+      },
+    });
+    if (name === null) {
+      return; // user cancelled
+    }
+    const path = normalizeNewNotePath(`${folder}/${name}`);
+    try {
+      await createNoteAtPath(path);
+    } catch (err) {
+      window.alert(`Could not create note "${path}": ${err.message}`);
+    }
+  }
+
   // --- "+ New folder" (docs/04-API-SPEC.md's `POST /api/folders/{path}`) --
 
   /**
@@ -941,12 +971,22 @@
       return !renameModalFieldEl.classList.contains('hidden');
     }
 
-    function open({ title, description, showInput, label, initialValue, confirmLabel, cancelLabel, danger, validate }) {
+    // `lockedPrefix`, when given, shows a non-editable "In folder: …" chip
+    // above the input instead of making the caller pre-fill (and the user
+    // re-type or accidentally clobber) the folder part of a path - used by
+    // "New Note"/"New Task" from a folder's right-click menu (see
+    // createNewNote below). The input then only collects the bare name;
+    // `validate` (still the caller's) is responsible for combining the two.
+    function open({ title, description, showInput, label, initialValue, confirmLabel, cancelLabel, danger, validate, lockedPrefix }) {
       renameModalTitleEl.textContent = title;
       renameModalDescriptionEl.textContent = description || '';
       renameModalDescriptionEl.classList.toggle('hidden', !description);
       renameModalFieldEl.classList.toggle('hidden', !showInput);
       renameModalLabelEl.textContent = label || 'Name';
+      if (renameModalLockedPrefixEl) {
+        renameModalLockedPrefixEl.textContent = lockedPrefix ? `In folder: ${lockedPrefix}` : '';
+        renameModalLockedPrefixEl.classList.toggle('hidden', !lockedPrefix);
+      }
       renameModalInputEl.value = initialValue || '';
       renameModalErrorEl.classList.add('hidden');
       renameModalConfirmBtn.textContent = confirmLabel || 'OK';
@@ -1165,12 +1205,39 @@
     '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">' +
     '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />' +
     '</svg>';
+  const ICON_NEW_TASK =
+    '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-5 9l2 2 4-4" />' +
+    '</svg>';
+  // Case-sensitive - mirrors TaskFolders.IsInCompletedFolder on the backend
+  // (docs' v0.2.1 contract).
+  const COMPLETED_FOLDER = 'Completed';
+
+  function isInCompletedFolder(path) {
+    return path.split('/').slice(0, -1).includes(COMPLETED_FOLDER);
+  }
 
   function handleTreeContextMenu(entry, x, y, anchorEl) {
-    const items = [
+    const items = [];
+    // "New Note"/"New Task" (v0.2.1) - folders only, created directly
+    // inside the right-clicked folder.
+    if (entry.type === 'folder') {
+      items.push({ id: 'tree-context-new-note', label: 'New Note', icon: ICON_NEW_NOTE, onSelect: () => createNewNoteInFolder(entry.path) });
+      // "New Task" is omitted for a `Completed` folder itself or anything
+      // inside one - the server rejects creating a task there (v0.2.1's
+      // "Create ... into a folder inside a Completed folder is rejected").
+      // `${entry.path}/x` checks a hypothetical child so a folder literally
+      // named `Completed` (isInCompletedFolder only looks at *ancestor*
+      // segments, so it wouldn't otherwise catch the folder itself) is
+      // covered too.
+      if (!isInCompletedFolder(`${entry.path}/x`)) {
+        items.push({ id: 'tree-context-new-task', label: 'New Task', icon: ICON_NEW_TASK, onSelect: () => Tasks.openCreateTask({ folder: entry.path }) });
+      }
+    }
+    items.push(
       { id: 'tree-context-rename', label: 'Rename', icon: ICON_RENAME, onSelect: () => openRenameModal(entry) },
       { id: 'tree-context-move-to', label: 'Move to…', icon: ICON_MOVE_TO, onSelect: () => openMoveToMenu(entry, anchorEl) },
-    ];
+    );
     // "Convert to task" (docs/features/tasks-kanban/PLAN.md §5's "Notes
     // integration") - notes only, and not for a note that's already a task.
     if (entry.type === 'file' && !Tasks.isTaskPath(entry.path)) {
@@ -1179,6 +1246,16 @@
         label: 'Convert to task',
         icon: ICON_CONVERT_TO_TASK,
         onSelect: () => Tasks.convertNote(entry.path),
+      });
+    }
+    // "Complete task" (v0.2.1) - task notes only, and not for one already
+    // sitting in a Completed folder.
+    if (entry.type === 'file' && Tasks.isTaskPath(entry.path) && !isInCompletedFolder(entry.path)) {
+      items.push({
+        id: 'tree-context-complete-task',
+        label: 'Complete task',
+        icon: ICON_CONVERT_TO_TASK,
+        onSelect: () => Tasks.completeTaskByPath(entry.path),
       });
     }
     items.push({ id: 'tree-context-delete', label: 'Delete', icon: ICON_DELETE, danger: true, onSelect: () => deleteEntry(entry) });
@@ -2012,6 +2089,16 @@
       items: [
         { id: 'new-menu-note', label: 'New Note', icon: ICON_NEW_NOTE, onSelect: () => createNewNote(defaultFolder) },
         { id: 'new-menu-folder', label: 'New Folder', icon: ICON_NEW_FOLDER, onSelect: () => createNewFolder(defaultFolder) },
+        {
+          id: 'new-menu-task',
+          label: 'New Task',
+          icon: ICON_NEW_TASK,
+          // Sidebar "+New" has no `defaultFolder` (it targets whatever path
+          // is typed) - config.folder ("Task") is the sensible default
+          // there; the Home view's "+New" prefers the folder currently
+          // being browsed, per this phase's task brief.
+          onSelect: () => Tasks.openCreateTask({ folder: defaultFolder || Tasks.getDefaultFolder() }),
+        },
         { id: 'new-menu-template', label: 'New from Template', icon: ICON_TEMPLATE, disabled: true },
         { id: 'new-menu-drawing', label: 'New Drawing', icon: ICON_DRAWING, disabled: true },
       ],

@@ -68,19 +68,32 @@ public sealed class DotNotesTaskMcpReviewRegressionTests : IDisposable
     public async Task UpdateTask_RenameOntoAnExistingNote_IsAnMcpException()
     {
         var task = await _tools.CreateTask("Original");
-        await _repository.SaveAsync("tasks/TASK-1 - Taken.md", "# a plain note already there");
+        await _repository.SaveAsync("Task/TASK-1 - Taken.md", "# a plain note already there");
 
         var ex = await Assert.ThrowsAsync<McpException>(() => _tools.UpdateTask(task.Id, title: "Taken"));
         Assert.Contains("already exists", ex.Message);
     }
 
     [Fact]
-    public async Task ArchiveTask_WhenArchiveDestinationIsTaken_IsAnMcpException()
+    public async Task CompleteTask_WhenCompletedDestinationIsTakenByAFile_AppendsSuffixRatherThanThrowing()
+    {
+        var task = await _tools.CreateTask("Complete me");
+        await _repository.SaveAsync("Task/Completed/TASK-1 - Complete me.md", "# squatting on the completed path");
+
+        var completed = await _tools.CompleteTask(task.Id);
+
+        Assert.Equal("Task/Completed/TASK-1 - Complete me (2).md", completed.Path);
+    }
+
+    [Fact]
+    public async Task ArchiveTask_DeprecatedAlias_WhenCompletedDestinationIsTaken_AppendsSuffix()
     {
         var task = await _tools.CreateTask("Archive me");
-        await _repository.SaveAsync("tasks/archive/TASK-1 - Archive me.md", "# squatting on the archive path");
+        await _repository.SaveAsync("Task/Completed/TASK-1 - Archive me.md", "# squatting on the completed path");
 
-        await Assert.ThrowsAsync<McpException>(() => _tools.ArchiveTask(task.Id));
+        var archived = await _tools.ArchiveTask(task.Id);
+
+        Assert.Equal("Task/Completed/TASK-1 - Archive me (2).md", archived.Path);
     }
 
     [Fact]
@@ -99,9 +112,9 @@ public sealed class DotNotesTaskMcpReviewRegressionTests : IDisposable
     [Fact]
     public async Task MoveTask_WithBeforeId_InsertsBeforeIt()
     {
-        var a = await _tools.CreateTask("A");
-        var b = await _tools.CreateTask("B");
-        var c = await _tools.CreateTask("C");
+        var a = await _tools.CreateTask("A", status: "To Do");
+        var b = await _tools.CreateTask("B", status: "To Do");
+        var c = await _tools.CreateTask("C", status: "To Do");
 
         await _tools.MoveTask(c.Id, "To Do", beforeId: b.Id);
 

@@ -63,13 +63,13 @@ public sealed class DotNotesTaskMcpToolsTests : IDisposable
 
         Assert.Equal("TASK-1", task.Id);
         Assert.Equal("My First Task", task.Title);
-        Assert.Equal("To Do", task.Status);
+        Assert.Equal("Backlog", task.Status);
         Assert.Equal(string.Empty, task.Description);
         Assert.Empty(task.AcceptanceCriteria);
         Assert.Equal(0, task.AcTotal);
         Assert.Equal(0, task.AcChecked);
-        Assert.False(task.Archived);
-        Assert.Equal("tasks/TASK-1 - My First Task.md", task.Path);
+        Assert.False(task.Completed);
+        Assert.Equal("Task/TASK-1 - My First Task.md", task.Path);
     }
 
     [Fact]
@@ -166,13 +166,30 @@ public sealed class DotNotesTaskMcpToolsTests : IDisposable
     }
 
     [Fact]
-    public async Task ListTasks_ExcludesArchivedUnlessRequested()
+    public async Task ListTasks_ExcludesCompletedUnlessRequested()
     {
-        var task = await _tools.CreateTask("To be archived");
-        await _tools.ArchiveTask(task.Id);
+        var task = await _tools.CreateTask("To be completed");
+        await _tools.CompleteTask(task.Id);
 
         Assert.Empty(_tools.ListTasks());
+        Assert.Single(_tools.ListTasks(includeCompleted: true));
+    }
+
+    [Fact]
+    public async Task ListTasks_IncludeArchivedAlias_StillIncludesCompleted()
+    {
+        var task = await _tools.CreateTask("To be completed via alias check");
+        await _tools.CompleteTask(task.Id);
+
         Assert.Single(_tools.ListTasks(includeArchived: true));
+    }
+
+    [Fact]
+    public async Task CreateTask_WithFolder_CreatesUnderThatFolder()
+    {
+        var task = await _tools.CreateTask("In a subfolder", folder: "Projects/Alpha");
+
+        Assert.Equal("Projects/Alpha/TASK-1 - In a subfolder.md", task.Path);
     }
 
     // ---- update_task ----
@@ -316,17 +333,60 @@ public sealed class DotNotesTaskMcpToolsTests : IDisposable
         await Assert.ThrowsAsync<McpException>(() => _tools.MoveTask(task.Id, "Not A Status"));
     }
 
-    // ---- archive_task ----
+    /// <summary>
+    /// Regression test for finding #5, exercised through the MCP surface:
+    /// moving a task to its own current unrecognised raw status must
+    /// succeed as a Backlog-column reorder (honouring beforeId) rather than
+    /// fail to find any destination column, since the raw status value
+    /// itself is not a board column name.
+    /// </summary>
+    [Fact]
+    public async Task MoveTask_ToOwnUnrecognisedRawStatus_SucceedsAsBacklogReorder()
+    {
+        var content = "---\nid: TASK-1\nstatus: Blocked\n---\n";
+        var writeResult = await _repository.SaveAsync("Task/TASK-1 - X.md", content);
+        _taskIndex.NoteSaved(writeResult.Path, content, writeResult.UpdatedAt);
+
+        var other = await _tools.CreateTask("Other"); // lands in Backlog
+
+        var moved = await _tools.MoveTask("TASK-1", "Blocked", beforeId: other.Id);
+
+        Assert.Equal("Blocked", moved.Status);
+        var board = _tools.GetBoard();
+        var backlog = board.Columns.Single(c => c.Status == "Backlog");
+        Assert.Equal(new[] { "TASK-1", other.Id }, backlog.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    // ---- complete_task / archive_task (deprecated alias) ----
 
     [Fact]
-    public async Task ArchiveTask_MovesUnderArchiveFolderAndMarksArchived()
+    public async Task CompleteTask_MovesUnderCompletedFolderAndMarksCompleted()
     {
-        var task = await _tools.CreateTask("Archive me");
+        var task = await _tools.CreateTask("Complete me");
+
+        var completed = await _tools.CompleteTask(task.Id);
+
+        Assert.True(completed.Completed);
+        Assert.Equal("Task/Completed/TASK-1 - Complete me.md", completed.Path);
+        Assert.Equal("Done", completed.Status);
+    }
+
+    [Fact]
+    public async Task CompleteTask_UnknownId_ThrowsMcpException()
+    {
+        var ex = await Assert.ThrowsAsync<McpException>(() => _tools.CompleteTask("TASK-999"));
+        Assert.Contains("TASK-999", ex.Message);
+    }
+
+    [Fact]
+    public async Task ArchiveTask_DeprecatedAlias_StillCompletesTheTask()
+    {
+        var task = await _tools.CreateTask("Archive alias");
 
         var archived = await _tools.ArchiveTask(task.Id);
 
-        Assert.True(archived.Archived);
-        Assert.StartsWith("tasks/archive/", archived.Path);
+        Assert.True(archived.Completed);
+        Assert.Equal("Task/Completed/TASK-1 - Archive alias.md", archived.Path);
     }
 
     [Fact]
@@ -346,10 +406,13 @@ public sealed class DotNotesTaskMcpToolsTests : IDisposable
 
         var board = _tools.GetBoard();
 
-        Assert.Equal(["To Do", "In Progress", "Done"], board.Columns.Select(c => c.Status).ToArray());
-        Assert.Single(board.Columns[0].Tasks);
+        Assert.Equal(["Backlog", "To Do", "In Progress", "Done"], board.Columns.Select(c => c.Status).ToArray());
+        Assert.True(board.Columns[0].IsBacklog);
+        Assert.All(board.Columns.Skip(1), c => Assert.False(c.IsBacklog));
+        Assert.Empty(board.Columns[0].Tasks);
         Assert.Single(board.Columns[1].Tasks);
-        Assert.Empty(board.Columns[2].Tasks);
+        Assert.Single(board.Columns[2].Tasks);
+        Assert.Empty(board.Columns[3].Tasks);
     }
 
     [Fact]
@@ -388,6 +451,22 @@ public sealed class DotNotesTaskMcpToolsTests : IDisposable
         var results = _tools.SearchTasks("keyword", limit: 2);
 
         Assert.Equal(2, results.Count);
+    }
+
+    /// <summary>
+    /// Regression test for finding #4: search_tasks excludes completed
+    /// tasks by default and only includes them when includeCompleted (or
+    /// its deprecated includeArchived alias) is set.
+    /// </summary>
+    [Fact]
+    public async Task SearchTasks_ExcludesCompletedUnlessIncludeCompletedIsSet()
+    {
+        var task = await _tools.CreateTask("Findable login fix");
+        await _tools.CompleteTask(task.Id);
+
+        Assert.Empty(_tools.SearchTasks("login"));
+        Assert.Single(_tools.SearchTasks("login", includeCompleted: true));
+        Assert.Single(_tools.SearchTasks("login", includeArchived: true));
     }
 
     // ---- get_task_workflow / resource ----

@@ -445,6 +445,20 @@ service) → `api-developer` + `mcp-server-engineer` (in parallel);
 `frontend-integrator` (UI, in parallel with the backend, against the
 plan's contract) → `qa-test-engineer` (tests, parity, review).
 
+### Phase 12 follow-up (v0.2.1)
+
+Real-use gaps found immediately after v0.2.0 shipped: no dedicated
+"not started" column (unrecognised statuses spilled into ad hoc
+trailing columns), no way to create a task straight into a folder, and
+Archive's single vault-wide `<Folder>/archive/` didn't match how tasks
+actually get organized into per-project subfolders. Addressed without
+opening a new phase — see `docs/features/tasks-kanban/PLAN.md`'s
+"v0.2.1 changes" section and `CHANGELOG.md`'s v0.2.1 entry for the full
+list (Backlog column, Complete replaces Archive with per-folder
+`Completed` subfolders, `Tasks:Folder` default renamed `tasks` → `Task`
+with an automatic startup migration, relaxed status-key task detection,
+folder-scoped task creation).
+
 ---
 
 ## When to delegate — quick reference

@@ -54,9 +54,9 @@ public sealed class TasksReviewRegressionTests : IDisposable
     [Fact]
     public async Task Move_WithBeforeId_InsertsBeforeThatCard()
     {
-        var a = await CreateAsync("A");
-        var b = await CreateAsync("B");
-        var c = await CreateAsync("C");
+        var a = await CreateAsync("A", "To Do");
+        var b = await CreateAsync("B", "To Do");
+        var c = await CreateAsync("C", "To Do");
 
         var response = await _client.PostAsJsonAsync($"/api/tasks/{c}/move", new { status = "To Do", beforeId = b });
 
@@ -67,9 +67,9 @@ public sealed class TasksReviewRegressionTests : IDisposable
     [Fact]
     public async Task Move_BeforeIdWinsOverIndex()
     {
-        var a = await CreateAsync("A");
-        var b = await CreateAsync("B");
-        var c = await CreateAsync("C");
+        var a = await CreateAsync("A", "To Do");
+        var b = await CreateAsync("B", "To Do");
+        var c = await CreateAsync("C", "To Do");
 
         var response = await _client.PostAsJsonAsync($"/api/tasks/{c}/move", new { status = "To Do", index = 0, beforeId = b });
 
@@ -81,7 +81,7 @@ public sealed class TasksReviewRegressionTests : IDisposable
     public async Task Move_BeforeIdNotInTargetColumn_Returns400()
     {
         var a = await CreateAsync("A", "Done");
-        var b = await CreateAsync("B");
+        var b = await CreateAsync("B", "To Do");
 
         var response = await _client.PostAsJsonAsync($"/api/tasks/{b}/move", new { status = "To Do", beforeId = a });
 
@@ -93,9 +93,9 @@ public sealed class TasksReviewRegressionTests : IDisposable
     [Fact]
     public async Task Move_ToWhereItAlreadyIs_DoesNotTouchTheFile()
     {
-        var a = await CreateAsync("A");
-        await CreateAsync("B");
-        var file = Path.Combine(_vaultRootPath, "tasks", "TASK-1 - A.md");
+        var a = await CreateAsync("A", "To Do");
+        await CreateAsync("B", "To Do");
+        var file = Path.Combine(_vaultRootPath, "Task", "TASK-1 - A.md");
         File.SetLastWriteTimeUtc(file, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
         var response = await _client.PostAsJsonAsync($"/api/tasks/{a}/move", new { status = "To Do", index = 0 });
@@ -126,7 +126,7 @@ public sealed class TasksReviewRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Move_WithinUnknownStatusColumn_Works()
+    public async Task Move_WithinBacklogColumn_WithMixedUnknownAndBacklogStatuses_Works()
     {
         foreach (var n in new[] { 1, 2 })
         {
@@ -141,10 +141,14 @@ public sealed class TasksReviewRegressionTests : IDisposable
             await Task.Delay(100);
         }
 
-        var response = await _client.PostAsJsonAsync("/api/tasks/TASK-2/move", new { status = "Blocked", index = 0 });
+        // Both land in the Backlog column (their raw status "Blocked" isn't
+        // a configured status) rather than a trailing column of their own.
+        Assert.Equal(new[] { "TASK-1", "TASK-2" }, await ColumnAsync("Backlog"));
+
+        var response = await _client.PostAsJsonAsync("/api/tasks/TASK-2/move", new { status = "Backlog", index = 0 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(new[] { "TASK-2", "TASK-1" }, await ColumnAsync("Blocked"));
+        Assert.Equal(new[] { "TASK-2", "TASK-1" }, await ColumnAsync("Backlog"));
     }
 
     private sealed record IdDto(string Id);

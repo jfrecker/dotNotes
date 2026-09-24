@@ -18,10 +18,10 @@ public sealed record TaskFilter
     public string? Query { get; init; }
 
     /// <summary>
-    /// Whether archived tasks (see <see cref="TaskItem.Archived"/>) are
+    /// Whether completed tasks (see <see cref="TaskItem.Completed"/>) are
     /// included. Defaults to <see langword="false"/>.
     /// </summary>
-    public bool IncludeArchived { get; init; }
+    public bool IncludeCompleted { get; init; }
 
     public static readonly TaskFilter Empty = new();
 }

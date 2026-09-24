@@ -18,8 +18,10 @@ public static class TaskWorkflowGuide
 
         This guide is for AI assistants using dotNotes' task tools
         (`list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`,
-        `archive_task`, `get_board`, `search_tasks`). It also doubles as the
+        `complete_task`, `get_board`, `search_tasks`). It also doubles as the
         `dotnotes://workflow/tasks` resource - the content is identical.
+        (`archive_task` still exists as a deprecated alias of `complete_task`
+        for older clients - use `complete_task` instead.)
 
         ## What a task is
 
@@ -28,7 +30,11 @@ public static class TaskWorkflowGuide
         `milestone`, `dependencies`, `ordinal`, ...) plus a few marked body
         sections: Description, Acceptance Criteria, Implementation Plan,
         Implementation Notes, Final Summary. It is fully editable in the app
-        (kanban board or the "All Tasks" list) like any other note.
+        (kanban board or the "All Tasks" list) like any other note. A task can
+        live in any folder - `create_task`'s optional `folder` defaults to
+        the configured tasks folder (`Task` by default) but can be any
+        vault-relative folder, e.g. `Task/ProjectX`, to keep a project's tasks
+        next to its notes.
 
         **Never hand-edit a task's frontmatter or its marked sections via
         `update_note` / `create_note`.** Those tools treat the file as plain
@@ -40,9 +46,12 @@ public static class TaskWorkflowGuide
         Valid status and priority values are **not fixed** - they come from
         this dotNotes instance's own configuration. Call `get_board` (or
         `list_tasks`) first if you're unsure what statuses currently exist;
-        it returns one column per configured status, in board order. Task
-        ids look like `TASK-12` (an id prefix plus a number) and are
-        case-insensitive.
+        it returns one column per configured status, **Backlog first**. A
+        task whose status is empty, unrecognised, or the Backlog status
+        itself always shows in the Backlog column (`isBacklog: true`) rather
+        than in a trailing column of its own - there is no such thing as an
+        "unlisted" status column any more. Task ids look like `TASK-12` (an
+        id prefix plus a number) and are case-insensitive.
 
         ## When to create a task
 
@@ -104,10 +113,18 @@ public static class TaskWorkflowGuide
           `finalSummary`: a short, PR-description-style summary of what
           changed and why, written for someone reviewing the work rather
           than someone about to redo it.
-        - Move the task to its Done-like status with `move_task`.
-        - Reserve `archive_task` for tasks that turned out to be duplicates
-          or were cancelled outright - not for completed work, which belongs
-          in the Done-like column instead.
+        - Move the task to its Done-like status with `move_task` if you still
+          want it visible on the board for review, or call `complete_task`
+          once it's truly finished: this sets its status to the configured
+          completed status and moves its note into a `Completed` subfolder
+          next to its current location (e.g. `Task/ProjectX/TASK-3 - X.md`
+          -> `Task/ProjectX/Completed/TASK-3 - X.md`), hiding it from the
+          board and `list_tasks`/`search_tasks` unless `includeCompleted` is
+          set. `move_task` to a Done-like status only changes the status -
+          it never moves the file - so `complete_task` is the one that
+          actually archives the note.
+        - `complete_task` is also fine for tasks that turned out to be
+          duplicates or were cancelled outright, not just finished work.
 
         ## Ordering
 

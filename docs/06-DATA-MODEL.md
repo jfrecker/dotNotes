@@ -183,8 +183,10 @@ Full contract: docs/features/tasks-kanban/PLAN.md §2/§3. Summary:
 
 - **A task is a note**, recognised by frontmatter, not location: the file
   starts (optionally after a BOM, CRLF-tolerant) with a `---` line, a
-  closing `---` line, the block parses as a YAML mapping, and it has
-  non-empty scalar `id` **and** `status` keys.
+  closing `---` line, the block parses as a YAML mapping, and it has a
+  non-empty scalar `id` **and** a `status` key present (its value may be
+  empty/`null` — v0.2.1 relaxed this from requiring a non-empty `status`,
+  to match Backlog.md's own format; an empty status means "Backlog").
 - **Frontmatter schema** (Backlog.md's field names/order): `id, title,
   status, assignee (list), reporter, created_date, updated_date, labels
   (list), milestone, dependencies (list), priority, ordinal`. Unknown keys
@@ -234,7 +236,7 @@ Full contract: docs/features/tasks-kanban/PLAN.md §2/§3. Summary:
   current file name is still id-derived; a manually-renamed file's title
   is updated in frontmatter only, per usual "one code path" rules.
 - **IDs:** `<Tasks:IdPrefix>-<N>` (default prefix `TASK`), `N` = 1 + the
-  max numeric top-level id over *all* tasks including archived
+  max numeric top-level id over *all* tasks including completed
   (case-insensitive prefix match; dotted subtask ids like `TASK-5.1` are
   ignored for the max). IDs are never reused.
 - **Ordering:** `ordinal` (double) ascending, missing last, then
@@ -243,17 +245,67 @@ Full contract: docs/features/tasks-kanban/PLAN.md §2/§3. Summary:
   index *i* uses the midpoint of its new neighbours (top = next/2, bottom
   = prev+1000); if a neighbour lacks an ordinal or the gap is smaller than
   `1e-6`, the whole column is renumbered 1000, 2000, ... and only the
-  files whose ordinal actually changed are written.
-- **Archive:** a task is archived by moving its note to
-  `<Tasks:Folder>/archive/` via `IVaultReorganizationService` (wikilinks
-  rewritten); any task whose path is under that folder is `archived` and
-  excluded from list/board results unless explicitly included. Dependency
-  lists are left untouched (ids are never reused, so they stay meaningful).
-- **Unknown status:** the board shows an extra trailing column for any
-  status present on a task that isn't in the configured `Tasks:Statuses`
-  list, rather than hiding it. Moving/reordering within such a column (and
-  re-saving a task with its current status) is allowed; creating a task with,
-  or switching one to, a brand-new unknown status is rejected.
+  files whose ordinal actually changed are written. Ordering within the
+  Backlog column spans every raw status that maps there (empty,
+  unrecognised, or the Backlog status itself); column membership, not raw
+  status equality, drives the ordinal math.
+- **Complete** (v0.2.1, replaces Archive): `CompleteAsync` sets a task's
+  status to `Tasks:CompletedStatus` (default `Done`) and moves its note
+  to `<directory of its current path>/Completed/<file name>` via
+  `IVaultReorganizationService` (wikilinks rewritten) — e.g.
+  `Task/ProjectX/TASK-3 - My Task.md` becomes
+  `Task/ProjectX/Completed/TASK-3 - My Task.md`; a root-level task goes
+  to `Completed/...`. The `Completed` folder is created if missing; a
+  name collision appends a numeric suffix before `.md` (`(2)`, `(3)`, …),
+  never overwriting. Already being under a `Completed` folder makes this
+  a no-op beyond ensuring the status (no nested `Completed/Completed`).
+  `TaskItem.Completed` (renamed from `TaskItem.Archived`) is true when
+  *any* segment of the task's vault-relative path is exactly `Completed`
+  (ordinal/case-sensitive comparison — `completed`/`COMPLETED` don't
+  count), regardless of which top-level folder the task lives under;
+  such tasks are excluded from list/board/search results unless
+  explicitly included. Dependency lists are left untouched (ids are
+  never reused, so they stay meaningful). Dragging a card to the column
+  matching `Tasks:CompletedStatus` only changes `status` via `move_task`/
+  `POST .../move` — it does not move the file; only Complete does that.
+  `archive_task`/`POST .../archive` are kept as deprecated aliases
+  calling the same code path.
+- **Backlog column:** `Tasks:BacklogStatus` (default `Backlog`) is always
+  the first effective status, prepended to `Tasks:Statuses` if a custom
+  configuration omits it. A task's raw `status` maps to the Backlog
+  column when it's empty, doesn't case-insensitively match any other
+  effective status, or matches `Tasks:BacklogStatus` itself — there are
+  no more trailing "unknown status" columns. Cards keep their original
+  raw status value even while shown in Backlog. A blank `status` on
+  create defaults to `Tasks:DefaultStatus` if set, else the Backlog
+  status.
+- **Task discovery is folder-agnostic**: `Tasks:Folder` (default `Task`,
+  renamed from `tasks` in v0.2.1) is only where a *new* task is created
+  by default — any note anywhere in the vault with task frontmatter is
+  a task regardless of its folder, and `TaskCreateRequest.Folder` lets a
+  caller (UI folder-context-menu "New Task", REST `folder`, MCP
+  `create_task`'s `folder`) create straight into any folder; creating
+  into a folder already inside a `Completed` folder is rejected.
+- **Startup migration (v0.2.1, idempotent):** runs after the vault root
+  is confirmed to exist and before the watcher's initial scan; never
+  crashes startup (logs and continues on any failure). No marker file is
+  written (the app keeps no state outside the vault), so the exact-name
+  matches below are simply re-checked each start. Step 1 — only when
+  `Tasks:Folder` is left at its default `Task`: a root-level folder
+  named exactly (ordinal, case-sensitive) `task` or `tasks` (v0.2.0's
+  default) is renamed/merged into `Task` using
+  `IVaultReorganizationService.MoveFolderAsync` so wikilinks are
+  rewritten; a rename that differs only by case (`task` → `Task`) always
+  hops through a temporary unique name (two `MoveFolderAsync` calls, raw
+  `Directory.Move` only as a fallback) so it works on case-insensitive
+  filesystems; on a name collision inside a merge, the legacy item is
+  left in place and a warning is logged rather than overwriting
+  anything; non-`.md` files in a merged folder are moved directly with
+  the filesystem; the legacy folder is removed only once it's empty. A
+  folder named `Tasks`/`TASKS` is never matched. Step 2 — for whatever
+  `Tasks:Folder` is configured (not gated on it being `Task`):
+  `<Folder>/archive` (exact name, v0.2.0's archive folder) is merged
+  into `<Folder>/Completed` with the same no-clobber rules.
 - **Index:** `InMemoryTaskIndex : ITaskIndex : IVaultChangeListener`, fed
   by the same `VaultWatcherService`/`VaultReorganizationService` fan-out as
   the link and search indexes. A monotonically increasing `Revision` bumps

@@ -9,14 +9,22 @@ namespace DotNotes.Core.Tasks;
 /// </summary>
 public interface ITaskService
 {
-    /// <summary>Matching, non-archived (unless <see cref="TaskFilter.IncludeArchived"/>) tasks, sorted per <see cref="TaskOrdering.Comparer"/> within each configured status group, then by status order.</summary>
+    /// <summary>Matching, non-completed (unless <see cref="TaskFilter.IncludeCompleted"/>) tasks, sorted per <see cref="TaskOrdering.Comparer"/> within each effective-status column, then by column order (Backlog first - see <see cref="TaskStatuses.GetEffectiveStatuses"/>).</summary>
     IReadOnlyList<TaskItem> List(TaskFilter filter);
 
-    /// <summary>One column per configured status (in configured order), plus a trailing column per unknown status present among matching tasks.</summary>
+    /// <summary>One column per effective status (Backlog first, see <see cref="TaskStatuses.GetEffectiveStatuses"/>); a task with an empty or unrecognised status lands in the Backlog column rather than a trailing column of its own.</summary>
     TaskBoard GetBoard(TaskFilter filter);
 
-    /// <summary>Case-insensitive substring/token match over id, title, description, labels, assignee. Id/title hits rank first.</summary>
+    /// <summary>Case-insensitive substring/token match over id, title, description, labels, assignee. Id/title hits rank first. Excludes completed tasks - same shape as <see cref="Search(string, int, bool)"/> with <c>includeCompleted: false</c>.</summary>
     IReadOnlyList<TaskItem> Search(string query, int limit);
+
+    /// <summary>
+    /// Like <see cref="Search(string, int)"/>, but includes completed tasks
+    /// too when <paramref name="includeCompleted"/> is <see langword="true"/>
+    /// (mirrors <see cref="TaskFilter.IncludeCompleted"/> for
+    /// <see cref="List"/>/<see cref="GetBoard"/>).
+    /// </summary>
+    IReadOnlyList<TaskItem> Search(string query, int limit, bool includeCompleted);
 
     /// <summary>Looks up a task by id, case-insensitively. <see langword="null"/> if not found.</summary>
     TaskItem? GetById(string id);
@@ -34,9 +42,16 @@ public interface ITaskService
     Task<TaskItem> UpdateAsync(string id, TaskUpdate update, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Moves a task to <paramref name="status"/>, optionally at a specific
-    /// 0-based <paramref name="index"/> among the destination column's
-    /// other (non-archived) tasks. Absent/too-large index means "end".
+    /// Moves a task to the board column named <paramref name="status"/>
+    /// (one of <see cref="TaskStatuses.GetEffectiveStatuses"/>, or the
+    /// task's own current status), optionally at a specific 0-based
+    /// <paramref name="index"/> among the destination column's other
+    /// (non-completed) tasks. Absent/too-large index means "end". Moving
+    /// into the Backlog column sets the task's status to the effective
+    /// Backlog status, <i>except</i> when the task already belongs to the
+    /// Backlog column (an empty/unrecognised/Backlog raw status) - a
+    /// reorder within Backlog keeps the task's raw status untouched and
+    /// only changes its ordinal.
     /// </summary>
     Task<TaskItem> MoveAsync(string id, string status, int? index, CancellationToken cancellationToken = default);
 
@@ -47,15 +62,22 @@ public interface ITaskService
     /// task in the destination column, else <see cref="TaskValidationException"/>);
     /// it takes precedence over <paramref name="index"/>, which is ambiguous
     /// when the caller's view of the column is filtered. Moving a task to
-    /// where it already is (same status, same position) is a no-op that
-    /// writes nothing. The task's own current status (and any status some
-    /// task already holds) is accepted as the destination even if it isn't
-    /// one of the configured statuses.
+    /// where it already is (same column, same position) is a no-op that
+    /// writes nothing.
     /// </summary>
     Task<TaskItem> MoveAsync(string id, string status, int? index, string? beforeTaskId, CancellationToken cancellationToken = default);
 
-    /// <summary>Archives the task (moves its note under <c>&lt;Tasks:Folder&gt;/archive/</c>, rewriting incoming wikilinks).</summary>
-    Task<TaskItem> ArchiveAsync(string id, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Marks the task complete: sets its status to
+    /// <see cref="TaskStatuses.GetEffectiveCompletedStatus"/> and moves its
+    /// note into a <see cref="TaskFolders.Completed"/> subfolder next to its
+    /// current location (rewriting incoming wikilinks), creating that
+    /// subfolder if needed and appending a numeric suffix on a name
+    /// collision (never overwriting). A no-op beyond ensuring the status if
+    /// the task's note is already under a <see cref="TaskFolders.Completed"/>
+    /// folder (idempotent - never nests <c>Completed/Completed</c>).
+    /// </summary>
+    Task<TaskItem> CompleteAsync(string id, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Converts an existing plain note into a task: adds frontmatter (new

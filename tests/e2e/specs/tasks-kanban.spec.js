@@ -284,7 +284,7 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     await titleInput.fill(`${task.id} - ${newTitle}`);
     await titleInput.press('Enter');
 
-    const newPath = `tasks/${task.id} - ${newTitle}.md`;
+    const newPath = `Task/${task.id} - ${newTitle}.md`;
     await expect(page.locator(`#file-tree [data-path="${newPath}"]`)).toBeVisible();
     await expect(page.locator(`#file-tree [data-path="${task.path}"]`)).toHaveCount(0);
     await expect(titleInput).toHaveValue(`${task.id} - ${newTitle}`);
@@ -313,7 +313,7 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     const header = page.locator('#task-preview-header');
     await expect(header).toBeVisible();
     await expect(header).toContainText(task.id);
-    await expect(header).toContainText('To Do');
+    await expect(header).toContainText('Backlog');
     await expect(header).toContainText('high');
     await expect(header).toContainText('preview-label');
 
@@ -454,8 +454,8 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     await page.locator('#tasks-board-label-filter').selectOption(label);
     await expect(cardKeep).toBeVisible();
     await expect(cardDrop).toHaveCount(0);
-    const todoCount = page.locator('.tasks-board-column[data-status="To Do"] .tasks-board-column-count');
-    await expect(todoCount).toHaveText('1');
+    const backlogCount = page.locator('.tasks-board-column[data-status="Backlog"] .tasks-board-column-count');
+    await expect(backlogCount).toHaveText('1');
 
     // Clearing restores both.
     await page.locator('#tasks-board-label-filter').selectOption('');
@@ -562,7 +562,7 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     await api.deleteNote(task.path);
   });
 
-  test('task modal edits every field, ticks AC, "Open note" navigates to the note, Archive moves it out of the board', async ({ page, request, baseURL, api }) => {
+  test('task modal edits every field, ticks AC, "Open note" navigates to the note, Complete moves it out of the board', async ({ page, request, baseURL, api }) => {
     const title = uniqueName('modal-all');
     const task = await createTaskViaApi(request, baseURL, { title, acceptanceCriteria: ['first', 'second'] });
 
@@ -606,7 +606,7 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     });
     expect(saved.description.trim()).toBe('New **description**');
     expect(saved.acceptanceCriteria.map((a) => [a.text, a.checked])).toEqual([['first', false], ['second', true], ['third added', false]]);
-    expect(saved.path).toBe(`tasks/${task.id} - ${newTitle}.md`); // title change renamed the file
+    expect(saved.path).toBe(`Task/${task.id} - ${newTitle}.md`); // title change renamed the file
 
     // "Open note" link opens the note in the editor.
     await page.locator(`.tasks-card[data-task-id="${task.id}"]`).click();
@@ -617,23 +617,23 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     await expect(page.locator('#editor')).toHaveValue(/^---\nid: /);
     await expect(page.locator('#note-title-input')).toHaveValue(`${task.id} - ${newTitle}`);
 
-    // Archive from the board.
+    // Complete from the board.
     await page.locator('#tasks-nav-board-btn').click();
     await page.locator(`.tasks-card[data-task-id="${task.id}"]`).click();
-    await page.locator('#task-modal-archive-btn').click();
+    await page.locator('#task-modal-complete-btn').click();
     await page.locator('#rename-modal-confirm-btn').click();
     await expect(page.locator(`.tasks-card[data-task-id="${task.id}"]`)).toHaveCount(0);
-    const archived = await (await request.get(`${baseURL}/api/tasks/${task.id}`)).json();
-    expect(archived.archived).toBe(true);
-    expect(archived.path).toBe(`tasks/archive/${task.id} - ${newTitle}.md`);
+    const completed = await (await request.get(`${baseURL}/api/tasks/${task.id}`)).json();
+    expect(completed.completed).toBe(true);
+    expect(completed.path).toBe(`Task/Completed/${task.id} - ${newTitle}.md`);
 
-    // Still visible in All Tasks with "show archived".
+    // Still visible in All Tasks with "show completed".
     await page.locator('#tasks-nav-all-btn').click();
     await expect(page.locator('#tasks-list-tbody tr', { hasText: task.id })).toHaveCount(0);
-    await page.locator('#tasks-list-show-archived').check();
+    await page.locator('#tasks-list-show-completed').check();
     await expect(page.locator('#tasks-list-tbody tr', { hasText: task.id })).toHaveCount(1);
 
-    await api.deleteNote(archived.path);
+    await api.deleteNote(completed.path);
   });
 
   test('modal save merges with a concurrent change made elsewhere (patch semantics: untouched fields are not overwritten)', async ({ page, request, baseURL, api }) => {
@@ -665,7 +665,7 @@ test.describe('Tasks & Kanban - QA hardening', () => {
     const task = await createTaskViaApi(request, baseURL, { title: uniqueName('live-refresh') });
     await page.goto('/');
     await page.locator('#tasks-nav-board-btn').click();
-    await expect(page.locator(`.tasks-board-column[data-status="To Do"] .tasks-card[data-task-id="${task.id}"]`)).toBeVisible();
+    await expect(page.locator(`.tasks-board-column[data-status="Backlog"] .tasks-card[data-task-id="${task.id}"]`)).toBeVisible();
 
     const res = await request.post(`${baseURL}/api/tasks/${task.id}/move`, { data: { status: 'Done' } });
     expect(res.ok()).toBeTruthy();

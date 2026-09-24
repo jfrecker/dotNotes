@@ -56,8 +56,8 @@ public sealed class TaskServiceTests : IDisposable
         var task = await _service.CreateAsync(new TaskCreateRequest { Title = "My First Task" });
 
         Assert.Equal("TASK-1", task.Id);
-        Assert.Equal("To Do", task.Status);
-        Assert.Equal("tasks/TASK-1 - My First Task.md", task.Path);
+        Assert.Equal("Backlog", task.Status);
+        Assert.Equal("Task/TASK-1 - My First Task.md", task.Path);
         Assert.Equal(1000d, task.Ordinal);
 
         var note = await _repository.GetAsync(task.Path);
@@ -93,24 +93,42 @@ public sealed class TaskServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_IdIncrementsPastGapsAndArchivedTasks()
+    public async Task CreateAsync_FolderInsideCompletedFolder_ThrowsValidation()
+    {
+        await Assert.ThrowsAsync<TaskValidationException>(() =>
+            _service.CreateAsync(new TaskCreateRequest { Title = "X", Folder = "Task/Completed" }));
+
+        await Assert.ThrowsAsync<TaskValidationException>(() =>
+            _service.CreateAsync(new TaskCreateRequest { Title = "X", Folder = "Task/Completed/Sub" }));
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithFolder_CreatesUnderThatFolder()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X", Folder = "Projects/Alpha" });
+
+        Assert.Equal("Projects/Alpha/TASK-1 - X.md", task.Path);
+    }
+
+    [Fact]
+    public async Task CreateAsync_IdIncrementsPastGapsAndCompletedTasks()
     {
         await _service.CreateAsync(new TaskCreateRequest { Title = "One" }); // TASK-1
         var second = await _service.CreateAsync(new TaskCreateRequest { Title = "Two" }); // TASK-2
-        await _service.ArchiveAsync(second.Id);
+        await _service.CompleteAsync(second.Id);
 
         var third = await _service.CreateAsync(new TaskCreateRequest { Title = "Three" });
-        Assert.Equal("TASK-3", third.Id); // archived TASK-2 still counts toward the max, never reused.
+        Assert.Equal("TASK-3", third.Id); // completed TASK-2 still counts toward the max, never reused.
     }
 
     [Fact]
     public async Task CreateAsync_IdPrefixMatchIsCaseInsensitive_AndIgnoresDottedSubtaskIds()
     {
         await _repository.SaveAsync(
-            "tasks/task-5 - Existing.md",
+            "Task/task-5 - Existing.md",
             "---\nid: task-5\nstatus: To Do\n---\n");
         await _repository.SaveAsync(
-            "tasks/TASK-5.1 - Subtask.md",
+            "Task/TASK-5.1 - Subtask.md",
             "---\nid: TASK-5.1\nstatus: To Do\n---\n");
         await _taskIndex.RebuildAsync();
 
@@ -164,8 +182,8 @@ public sealed class TaskServiceTests : IDisposable
 
         var updated = await _service.UpdateAsync(task.Id, new TaskUpdate { Title = "New Title" });
 
-        Assert.Equal("tasks/TASK-1 - New Title.md", updated.Path);
-        Assert.False(await _repository.ExistsAsync("tasks/TASK-1 - Old Title.md"));
+        Assert.Equal("Task/TASK-1 - New Title.md", updated.Path);
+        Assert.False(await _repository.ExistsAsync("Task/TASK-1 - Old Title.md"));
 
         var referrer = await _repository.GetAsync("notes/referrer.md");
         Assert.Contains("TASK-1 - New Title", referrer!.Content);
@@ -175,12 +193,12 @@ public sealed class TaskServiceTests : IDisposable
     public async Task UpdateAsync_TitleChange_DoesNotRename_WhenFileWasManuallyRenamed()
     {
         var task = await _service.CreateAsync(new TaskCreateRequest { Title = "Old Title" });
-        await _repository.MoveAsync(task.Path, "tasks/Custom Name.md");
+        await _repository.MoveAsync(task.Path, "Task/Custom Name.md");
         await _taskIndex.RebuildAsync();
 
         var updated = await _service.UpdateAsync(task.Id, new TaskUpdate { Title = "New Title" });
 
-        Assert.Equal("tasks/Custom Name.md", updated.Path);
+        Assert.Equal("Task/Custom Name.md", updated.Path);
         Assert.Equal("New Title", updated.Title);
     }
 
@@ -235,7 +253,7 @@ public sealed class TaskServiceTests : IDisposable
     {
         var a = await _service.CreateAsync(new TaskCreateRequest { Title = "A", Status = "Done" });
         var b = await _service.CreateAsync(new TaskCreateRequest { Title = "B", Status = "Done" });
-        var c = await _service.CreateAsync(new TaskCreateRequest { Title = "C" }); // To Do
+        var c = await _service.CreateAsync(new TaskCreateRequest { Title = "C" }); // Backlog
 
         var moved = await _service.MoveAsync(c.Id, "Done", 0);
 
@@ -251,42 +269,148 @@ public sealed class TaskServiceTests : IDisposable
         await Assert.ThrowsAsync<TaskValidationException>(() => _service.MoveAsync(task.Id, "Nowhere", null));
     }
 
+    /// <summary>
+    /// Regression test for finding #5: moving a task to its own current
+    /// unrecognised raw status (e.g. a hand-written "Blocked") must be
+    /// treated as a Backlog-column reorder - honouring beforeId against
+    /// other Backlog-column tasks - not silently fail to find any
+    /// destination column at all (the bug: the raw status value itself was
+    /// used as if it were a column name, which no task's classified column
+    /// could ever match).
+    /// </summary>
     [Fact]
-    public async Task ArchiveAsync_MovesUnderArchiveFolder_AndSetsArchivedFlag()
+    public async Task MoveAsync_ToOwnUnrecognisedRawStatus_IsBacklogColumnReorder_HonoursBeforeId()
+    {
+        var content = "---\nid: TASK-1\nstatus: Blocked\n---\n";
+        var writeResult = await _repository.SaveAsync("Task/TASK-1 - X.md", content);
+        _taskIndex.NoteSaved(writeResult.Path, content, writeResult.UpdatedAt);
+
+        var other = await _service.CreateAsync(new TaskCreateRequest { Title = "Other" }); // lands in Backlog
+
+        var moved = await _service.MoveAsync("TASK-1", "Blocked", null, other.Id);
+
+        Assert.Equal("Blocked", moved.Status); // raw status preserved, not overwritten to "Backlog"
+        var board = _service.GetBoard(TaskFilter.Empty);
+        var backlog = board.Columns.Single(c => c.Status == "Backlog");
+        Assert.True(backlog.IsBacklog);
+        Assert.Equal(new[] { "TASK-1", other.Id }, backlog.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    /// <summary>
+    /// Regression test for finding #5: moving a lone task (nothing else in
+    /// its column) to its own current unrecognised raw status, at its
+    /// current position, is a true no-op - it must not bump updated_date or
+    /// write anything.
+    /// </summary>
+    [Fact]
+    public async Task MoveAsync_ToOwnUnrecognisedRawStatus_AlreadyAtPosition_IsNoOp()
+    {
+        var content = "---\nid: TASK-1\nstatus: Blocked\n---\n";
+        var writeResult = await _repository.SaveAsync("Task/TASK-1 - X.md", content);
+        _taskIndex.NoteSaved(writeResult.Path, content, writeResult.UpdatedAt);
+
+        var moved = await _service.MoveAsync("TASK-1", "Blocked", null);
+
+        Assert.Equal("Blocked", moved.Status);
+        var afterMove = await _repository.GetAsync("Task/TASK-1 - X.md");
+        Assert.Equal(writeResult.UpdatedAt, afterMove!.UpdatedAt); // untouched on disk
+    }
+
+    [Fact]
+    public async Task CompleteAsync_MovesUnderCompletedFolder_AndSetsStatusAndFlag()
     {
         var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" });
-        var archived = await _service.ArchiveAsync(task.Id);
+        var completed = await _service.CompleteAsync(task.Id);
 
-        Assert.Equal("tasks/archive/TASK-1 - X.md", archived.Path);
-        Assert.True(archived.Archived);
+        Assert.Equal("Task/Completed/TASK-1 - X.md", completed.Path);
+        Assert.True(completed.Completed);
+        Assert.Equal("Done", completed.Status);
 
         var listed = _service.List(TaskFilter.Empty);
         Assert.DoesNotContain(listed, t => t.Id == task.Id);
 
-        var listedWithArchived = _service.List(new TaskFilter { IncludeArchived = true });
-        Assert.Contains(listedWithArchived, t => t.Id == task.Id);
+        var listedWithCompleted = _service.List(new TaskFilter { IncludeCompleted = true });
+        Assert.Contains(listedWithCompleted, t => t.Id == task.Id);
     }
 
     [Fact]
-    public async Task ArchiveAsync_RewritesIncomingWikilinks_WhenBareTitleWouldOtherwiseBecomeAmbiguous()
+    public async Task CompleteAsync_RootLevelTask_MovesUnderRootCompletedFolder()
     {
-        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" }); // tasks/TASK-1 - X.md
+        await _repository.SaveAsync("TASK-1 - Root.md", "---\nid: TASK-1\nstatus: To Do\n---\n");
+        await _taskIndex.RebuildAsync();
 
-        // Archiving only changes the note's *folder*, not its file name, so
-        // a link normally still resolves to the same note afterward (even
-        // by bare-title fallback) and is deliberately left untouched
+        var completed = await _service.CompleteAsync("TASK-1");
+
+        Assert.Equal("Completed/TASK-1 - Root.md", completed.Path);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NestedProjectFolder_MovesIntoSiblingCompletedFolder()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "Nested", Folder = "Task/ProjectX" });
+
+        var completed = await _service.CompleteAsync(task.Id);
+
+        Assert.Equal("Task/ProjectX/Completed/TASK-1 - Nested.md", completed.Path);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NameCollision_AppendsNumericSuffix_NeverOverwrites()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" });
+        await _repository.SaveAsync("Task/Completed/TASK-1 - X.md", "pre-existing content");
+
+        var completed = await _service.CompleteAsync(task.Id);
+
+        Assert.Equal("Task/Completed/TASK-1 - X (2).md", completed.Path);
+        var untouched = await _repository.GetAsync("Task/Completed/TASK-1 - X.md");
+        Assert.Equal("pre-existing content", untouched!.Content);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SecondCollision_UsesNextSuffix()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" });
+        await _repository.SaveAsync("Task/Completed/TASK-1 - X.md", "one");
+        await _repository.SaveAsync("Task/Completed/TASK-1 - X (2).md", "two");
+
+        var completed = await _service.CompleteAsync(task.Id);
+
+        Assert.Equal("Task/Completed/TASK-1 - X (3).md", completed.Path);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_Idempotent_WhenAlreadyCompleted_DoesNotNest()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" });
+        var once = await _service.CompleteAsync(task.Id);
+
+        var twice = await _service.CompleteAsync(task.Id);
+
+        Assert.Equal(once.Path, twice.Path);
+        Assert.DoesNotContain("Completed/Completed", twice.Path);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RewritesIncomingWikilinks_WhenBareTitleWouldOtherwiseBecomeAmbiguous()
+    {
+        var task = await _service.CreateAsync(new TaskCreateRequest { Title = "X" }); // Task/TASK-1 - X.md
+
+        // Completing only changes the note's *folder*, not its file name,
+        // so a link normally still resolves to the same note afterward
+        // (even by bare-title fallback) and is deliberately left untouched
         // (docs/06-DATA-MODEL.md's "Minimal" rewrite rule). A second,
         // unrelated note sharing the exact same bare title is added here so
-        // that once the task moves under archive/, resolving by bare title
-        // alone becomes genuinely ambiguous and picks the *other* note -
-        // forcing this path-style link to actually need rewriting.
+        // that once the task moves under Completed/, resolving by bare
+        // title alone becomes genuinely ambiguous and picks the *other*
+        // note - forcing this path-style link to actually need rewriting.
         await _repository.SaveAsync("elsewhere/TASK-1 - X.md", "unrelated");
-        await _repository.SaveAsync("notes/referrer.md", "[[tasks/TASK-1 - X]]");
+        await _repository.SaveAsync("notes/referrer.md", "[[Task/TASK-1 - X]]");
 
-        await _service.ArchiveAsync(task.Id);
+        await _service.CompleteAsync(task.Id);
 
         var referrer = await _repository.GetAsync("notes/referrer.md");
-        Assert.Contains("[[tasks/archive/TASK-1 - X]]", referrer!.Content);
+        Assert.Contains("[[Task/Completed/TASK-1 - X]]", referrer!.Content);
     }
 
     [Fact]
@@ -298,7 +422,7 @@ public sealed class TaskServiceTests : IDisposable
 
         Assert.Equal("TASK-1", converted.Id);
         Assert.Equal("My Idea", converted.Title);
-        Assert.Equal("To Do", converted.Status);
+        Assert.Equal("Backlog", converted.Status);
         Assert.Equal("ideas/TASK-1 - My Idea.md", converted.Path);
         Assert.Equal("Some existing free-form text.", converted.Description);
     }
@@ -345,8 +469,8 @@ public sealed class TaskServiceTests : IDisposable
     [Fact]
     public void Search_RanksIdAndTitleHitsFirst()
     {
-        _taskIndex.NoteChanged("tasks/TASK-1 - Fix login bug.md", "---\nid: TASK-1\nstatus: To Do\n---\nSomething about bug tracking in the body.\n");
-        _taskIndex.NoteChanged("tasks/TASK-2 - Unrelated.md", "---\nid: TASK-2\nstatus: To Do\n---\nThis mentions a bug deep in the description.\n");
+        _taskIndex.NoteChanged("Task/TASK-1 - Fix login bug.md", "---\nid: TASK-1\nstatus: To Do\n---\nSomething about bug tracking in the body.\n");
+        _taskIndex.NoteChanged("Task/TASK-2 - Unrelated.md", "---\nid: TASK-2\nstatus: To Do\n---\nThis mentions a bug deep in the description.\n");
 
         var results = _service.Search("bug", 10);
 
@@ -354,13 +478,44 @@ public sealed class TaskServiceTests : IDisposable
         Assert.Equal("TASK-1", results[0].Id); // title hit outranks description-only hit.
     }
 
+    /// <summary>
+    /// Regression test for finding #4: the includeCompleted overload of
+    /// Search excludes completed tasks by default (same shape as List/GetBoard)
+    /// and includes them when explicitly asked.
+    /// </summary>
     [Fact]
-    public void GetBoard_AddsTrailingColumnForUnknownStatus()
+    public void Search_IncludeCompletedOverload_ExcludesCompletedUnlessRequested()
     {
-        _taskIndex.NoteChanged("tasks/TASK-1 - X.md", "---\nid: TASK-1\nstatus: Blocked\n---\n");
+        _taskIndex.NoteChanged("Task/TASK-1 - Fix login bug.md", "---\nid: TASK-1\nstatus: To Do\n---\n");
+        _taskIndex.NoteChanged("Task/Completed/TASK-2 - Fix login redirect.md", "---\nid: TASK-2\nstatus: Done\n---\n");
+
+        Assert.Single(_service.Search("login", 10));
+        Assert.Single(_service.Search("login", 10, includeCompleted: false));
+        Assert.Equal(2, _service.Search("login", 10, includeCompleted: true).Count);
+    }
+
+    [Fact]
+    public void GetBoard_UnknownStatus_LandsInBacklogColumn_NoTrailingColumn()
+    {
+        _taskIndex.NoteChanged("Task/TASK-1 - X.md", "---\nid: TASK-1\nstatus: Blocked\n---\n");
 
         var board = _service.GetBoard(TaskFilter.Empty);
 
-        Assert.Equal(new[] { "To Do", "In Progress", "Done", "Blocked" }, board.Columns.Select(c => c.Status).ToArray());
+        Assert.Equal(new[] { "Backlog", "To Do", "In Progress", "Done" }, board.Columns.Select(c => c.Status).ToArray());
+        var backlog = board.Columns.Single(c => c.Status == "Backlog");
+        Assert.True(backlog.IsBacklog);
+        Assert.Contains(backlog.Tasks, t => t.Id == "TASK-1");
+        Assert.All(board.Columns.Where(c => c.Status != "Backlog"), c => Assert.False(c.IsBacklog));
+    }
+
+    [Fact]
+    public void GetBoard_BacklogColumnIsFirst_AndContainsEmptyStatusTasks()
+    {
+        _taskIndex.NoteChanged("Task/TASK-1 - X.md", "---\nid: TASK-1\nstatus:\n---\n");
+
+        var board = _service.GetBoard(TaskFilter.Empty);
+
+        Assert.Equal("Backlog", board.Columns[0].Status);
+        Assert.Contains(board.Columns[0].Tasks, t => t.Id == "TASK-1");
     }
 }

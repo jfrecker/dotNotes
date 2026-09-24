@@ -401,7 +401,7 @@ public sealed class TaskReviewRegressionTests : IDisposable
     public async Task Service_UpdateOnFileWithOddKnownKeys_DoesNotDropThem()
     {
         var path = await WriteTaskFileAsync(
-            "tasks/TASK-1 - Odd.md",
+            "Task/TASK-1 - Odd.md",
             "---\nid: TASK-1\ntitle: Odd\nstatus: To Do\nlabels: bug\nassignee: '@me'\ncreated_date: yesterday\nordinal: soon\n---\n\nBody\n");
 
         await _service.UpdateAsync("TASK-1", new TaskUpdate { Priority = "high" });
@@ -540,10 +540,10 @@ public sealed class TaskReviewRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Move_BeforeId_ArchivedTaskIsNotInTheColumn()
+    public async Task Move_BeforeId_CompletedTaskIsNotInTheColumn()
     {
         var c = await CreateColumnAsync(2);
-        await _service.ArchiveAsync(c[0].Id);
+        await _service.CompleteAsync(c[0].Id);
         var extra = await _service.CreateAsync(new TaskCreateRequest { Title = "Extra" });
 
         await Assert.ThrowsAsync<TaskValidationException>(() => _service.MoveAsync(extra.Id, "To Do", null, c[0].Id));
@@ -621,39 +621,66 @@ public sealed class TaskReviewRegressionTests : IDisposable
         Assert.Equal(new double?[] { 1000, 2000, 3000, 4000 }, Column("To Do").Select(id => _service.GetById(id)!.Ordinal).ToArray());
     }
 
-    // ================= F. unknown-status columns =================
+    // ================= F. Backlog column absorbs unknown/empty statuses =================
 
-    private async Task<string[]> SeedBlockedColumnAsync()
+    private async Task<string[]> SeedBacklogColumnAsync()
     {
         var ids = new[] { "TASK-11", "TASK-12", "TASK-13" };
+        var rawStatuses = new[] { "Blocked", "", "Backlog" };
         for (var i = 0; i < ids.Length; i++)
         {
             await WriteTaskFileAsync(
-                $"tasks/{ids[i]} - Blocked {i}.md",
-                $"---\nid: {ids[i]}\ntitle: Blocked {i}\nstatus: Blocked\nordinal: {(i + 1) * 1000}\n---\n\nBody\n");
+                $"Task/{ids[i]} - Backlog {i}.md",
+                $"---\nid: {ids[i]}\ntitle: Backlog {i}\nstatus: {rawStatuses[i]}\nordinal: {(i + 1) * 1000}\n---\n\nBody\n");
         }
 
         return ids;
     }
 
+    private string[] BacklogColumn() =>
+        _service.GetBoard(TaskFilter.Empty).Columns.Single(c => c.IsBacklog).Tasks.Select(t => t.Id).ToArray();
+
     [Fact]
-    public async Task Move_WithinAnUnknownStatusColumn_Works()
+    public async Task GetBoard_MixedRawStatuses_AllLandInTheSameBacklogColumn()
     {
-        var ids = await SeedBlockedColumnAsync();
+        var ids = await SeedBacklogColumnAsync();
 
-        var moved = await _service.MoveAsync(ids[2], "Blocked", 0);
+        Assert.Equal(ids, BacklogColumn());
+    }
 
-        Assert.Equal("Blocked", moved.Status);
-        Assert.Equal(new[] { ids[2], ids[0], ids[1] }, Column("Blocked"));
+    [Fact]
+    public async Task Move_WithinBacklog_KeepsRawStatus_OnlyChangesOrdinal()
+    {
+        var ids = await SeedBacklogColumnAsync();
 
-        await _service.MoveAsync(ids[0], "blocked", null, ids[2]); // case-insensitive, beforeId
-        Assert.Equal(new[] { ids[0], ids[2], ids[1] }, Column("Blocked"));
+        var moved = await _service.MoveAsync(ids[2], "Backlog", 0);
+
+        Assert.Equal("Backlog", moved.Status); // ids[2]'s raw status was already "Backlog" - unchanged.
+        Assert.Equal(new[] { ids[2], ids[0], ids[1] }, BacklogColumn());
+
+        var reordered = await _service.MoveAsync(ids[0], "backlog", null, ids[2]); // case-insensitive column name, beforeId
+        Assert.Equal("Blocked", reordered.Status); // raw "Blocked" status is preserved, not overwritten to "Backlog".
+        Assert.Equal(new[] { ids[0], ids[2], ids[1] }, BacklogColumn());
+    }
+
+    [Fact]
+    public async Task Move_FromBacklogToToDo_AndBack_Persists()
+    {
+        var ids = await SeedBacklogColumnAsync();
+
+        var movedOut = await _service.MoveAsync(ids[0], "To Do", null);
+        Assert.Equal("To Do", movedOut.Status);
+        Assert.DoesNotContain(ids[0], BacklogColumn());
+
+        var movedBack = await _service.MoveAsync(ids[0], "Backlog", null);
+        Assert.Equal("Backlog", movedBack.Status); // came from a non-Backlog column, so it gets the effective Backlog status.
+        Assert.Contains(ids[0], BacklogColumn());
     }
 
     [Fact]
     public async Task Update_ReSupplyingTheCurrentUnknownStatus_IsAllowed_ButSwitchingToAnotherUnknownIsNot()
     {
-        var ids = await SeedBlockedColumnAsync();
+        var ids = await SeedBacklogColumnAsync();
 
         var updated = await _service.UpdateAsync(ids[0], new TaskUpdate { Status = "Blocked", Priority = "high" });
         Assert.Equal("Blocked", updated.Status);
@@ -662,22 +689,27 @@ public sealed class TaskReviewRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_WithUnknownStatus_StaysStrict_EvenIfSomeTaskHoldsIt()
+    public async Task Create_WithUnknownStatus_StaysStrict()
     {
-        await SeedBlockedColumnAsync();
+        await SeedBacklogColumnAsync();
 
         await Assert.ThrowsAsync<TaskValidationException>(() =>
             _service.CreateAsync(new TaskCreateRequest { Title = "New", Status = "Blocked" }));
     }
 
     [Fact]
-    public async Task Move_ToAStatusHeldBySomeTask_IsAllowed_ButBrandNewUnknownIsNot()
+    public async Task Create_WithNoStatus_GoesToBacklog()
     {
-        await SeedBlockedColumnAsync();
-        var todo = await _service.CreateAsync(new TaskCreateRequest { Title = "Regular" });
+        var created = await _service.CreateAsync(new TaskCreateRequest { Title = "New" });
 
-        var moved = await _service.MoveAsync(todo.Id, "Blocked", null);
-        Assert.Equal("Blocked", moved.Status);
+        Assert.Equal("Backlog", created.Status);
+        Assert.Contains(created.Id, BacklogColumn());
+    }
+
+    [Fact]
+    public async Task Move_ToABrandNewUnknownStatus_IsRejected()
+    {
+        var todo = await _service.CreateAsync(new TaskCreateRequest { Title = "Regular" });
 
         await Assert.ThrowsAsync<TaskValidationException>(() => _service.MoveAsync(todo.Id, "Nowhere", null));
     }

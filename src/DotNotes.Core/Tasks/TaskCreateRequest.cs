@@ -18,7 +18,9 @@ public sealed record TaskCreateRequest
 
     /// <summary>
     /// Vault-relative folder to create the task's note under. Defaults to
-    /// the configured <c>Tasks:Folder</c> when omitted.
+    /// the configured <c>Tasks:Folder</c> when omitted. Rejected with
+    /// <see cref="TaskValidationException"/> if it names a folder inside a
+    /// <see cref="TaskFolders.Completed"/> folder.
     /// </summary>
     public string? Folder { get; init; }
 }

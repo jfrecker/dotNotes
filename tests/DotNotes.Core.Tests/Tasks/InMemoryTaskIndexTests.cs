@@ -36,10 +36,10 @@ public sealed class InMemoryTaskIndexTests : IDisposable
         // so without this every task would report the app-start time.
         var vaultOptions = Options.Create(new VaultOptions { RootPath = _vaultDirectory.FullName });
         var index = new InMemoryTaskIndex(_repository, Options.Create(new TasksOptions()), vaultOptions);
-        const string path = "tasks/TASK-1 - Hello.md";
+        const string path = "Task/TASK-1 - Hello.md";
         await _repository.SaveAsync(path, TaskContent);
         var fileTime = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(Path.Combine(_vaultDirectory.FullName, "tasks", "TASK-1 - Hello.md"), fileTime);
+        File.SetLastWriteTimeUtc(Path.Combine(_vaultDirectory.FullName, "Task", "TASK-1 - Hello.md"), fileTime);
 
         index.NoteChanged(path, TaskContent);
 
@@ -49,7 +49,7 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     [Fact]
     public async Task RebuildAsync_FindsTaskNotesOnly()
     {
-        await _repository.SaveAsync("tasks/TASK-1 - Hello.md", TaskContent);
+        await _repository.SaveAsync("Task/TASK-1 - Hello.md", TaskContent);
         await _repository.SaveAsync("notes/plain.md", PlainNoteContent);
 
         await _index.RebuildAsync();
@@ -63,11 +63,11 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     public void NoteChanged_AddsTask_AndBumpsRevision()
     {
         var before = _index.Revision;
-        _index.NoteChanged("tasks/TASK-1 - Hello.md", TaskContent);
+        _index.NoteChanged("Task/TASK-1 - Hello.md", TaskContent);
 
         Assert.True(_index.Revision > before);
         Assert.NotNull(_index.GetById("TASK-1"));
-        Assert.NotNull(_index.GetByPath("tasks/TASK-1 - Hello.md"));
+        Assert.NotNull(_index.GetByPath("Task/TASK-1 - Hello.md"));
     }
 
     [Fact]
@@ -83,10 +83,10 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     [Fact]
     public void NoteChanged_TaskBecomesPlainNote_RemovesFromIndex()
     {
-        _index.NoteChanged("tasks/TASK-1 - Hello.md", TaskContent);
+        _index.NoteChanged("Task/TASK-1 - Hello.md", TaskContent);
         Assert.NotNull(_index.GetById("TASK-1"));
 
-        _index.NoteChanged("tasks/TASK-1 - Hello.md", "No longer a task.");
+        _index.NoteChanged("Task/TASK-1 - Hello.md", "No longer a task.");
 
         Assert.Null(_index.GetById("TASK-1"));
         Assert.Empty(_index.GetAll());
@@ -95,10 +95,10 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     [Fact]
     public void NoteDeleted_RemovesTask_AndBumpsRevision()
     {
-        _index.NoteChanged("tasks/TASK-1 - Hello.md", TaskContent);
+        _index.NoteChanged("Task/TASK-1 - Hello.md", TaskContent);
         var before = _index.Revision;
 
-        _index.NoteDeleted("tasks/TASK-1 - Hello.md");
+        _index.NoteDeleted("Task/TASK-1 - Hello.md");
 
         Assert.True(_index.Revision > before);
         Assert.Null(_index.GetById("TASK-1"));
@@ -108,24 +108,41 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     public void NoteDeleted_UnknownPath_IsNoOp()
     {
         var before = _index.Revision;
-        _index.NoteDeleted("tasks/does-not-exist.md");
+        _index.NoteDeleted("Task/does-not-exist.md");
         Assert.Equal(before, _index.Revision);
     }
 
     [Fact]
-    public void ArchivedFlag_SetForPathsUnderConfiguredArchiveFolder()
+    public void CompletedFlag_SetForAnyCompletedSegment_RegardlessOfDepthOrConfiguredFolder()
     {
-        _index.NoteChanged("tasks/archive/TASK-1 - Hello.md", TaskContent);
+        _index.NoteChanged("Task/Completed/TASK-1 - Hello.md", TaskContent);
         var task = _index.GetById("TASK-1");
 
         Assert.NotNull(task);
-        Assert.True(task!.Archived);
+        Assert.True(task!.Completed);
+    }
+
+    [Fact]
+    public void CompletedFlag_SetForNestedCompletedSegment()
+    {
+        _index.NoteChanged("Task/ProjectX/Completed/TASK-1 - Hello.md", TaskContent);
+        Assert.True(_index.GetById("TASK-1")!.Completed);
+    }
+
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("COMPLETED")]
+    [InlineData("Completed ")]
+    public void CompletedFlag_NotSet_ForWrongCasingOrSpacing(string segment)
+    {
+        _index.NoteChanged($"Task/{segment}/TASK-1 - Hello.md", TaskContent);
+        Assert.False(_index.GetById("TASK-1")!.Completed);
     }
 
     [Fact]
     public void TitleFallback_DerivedFromFileNameWhenFrontmatterTitleMissing()
     {
-        _index.NoteChanged("tasks/TASK-1 - My Great Title.md", TaskContent);
+        _index.NoteChanged("Task/TASK-1 - My Great Title.md", TaskContent);
         var task = _index.GetById("TASK-1");
 
         Assert.Equal("My Great Title", task!.Title);
@@ -134,7 +151,7 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     [Fact]
     public void GetById_IsCaseInsensitive()
     {
-        _index.NoteChanged("tasks/TASK-1 - Hello.md", TaskContent);
+        _index.NoteChanged("Task/TASK-1 - Hello.md", TaskContent);
         Assert.NotNull(_index.GetById("task-1"));
     }
 
@@ -142,7 +159,7 @@ public sealed class InMemoryTaskIndexTests : IDisposable
     public void NoteSaved_UsesSuppliedTimestamp()
     {
         var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        _index.NoteSaved("tasks/TASK-1 - Hello.md", TaskContent, timestamp);
+        _index.NoteSaved("Task/TASK-1 - Hello.md", TaskContent, timestamp);
 
         Assert.Equal(timestamp, _index.GetById("TASK-1")!.UpdatedAt);
     }

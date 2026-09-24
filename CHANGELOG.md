@@ -2,6 +2,131 @@
 
 All notable changes to dotNotes are recorded here, most recent first.
 
+## v0.2.1 — Backlog column, Complete replaces Archive, Task folder rename (2026-09-24)
+
+A follow-up pass on v0.2.0's Tasks & Kanban feature, addressing real-use
+gaps found immediately after release: no way to create a task straight
+into a folder, no dedicated "not started yet" column, and status-key
+detection that was stricter than the Backlog.md format it's modeled on.
+See `docs/features/tasks-kanban/PLAN.md`'s "v0.2.1 changes" section for
+every decision.
+
+### Added — Backlog column and folder-scoped task creation
+
+- **Backlog column**: always the first Kanban column, regardless of
+  configured `Tasks:Statuses`. New `Tasks:BacklogStatus` (default
+  `Backlog`) — prepended to the effective status list if a custom
+  configuration omits it. Tasks with an empty, unrecognised, or Backlog
+  status all land here instead of spilling into ad hoc trailing
+  "unknown status" columns as before. New tasks default to Backlog.
+- **Detection relaxed**: a note is a task when its frontmatter has a
+  non-empty `id` and a `status` *key* (an empty/`null` value is fine —
+  it just means "Backlog"), matching Backlog.md's own format more
+  closely than v0.2.0's stricter "non-empty `status`" rule.
+- **Create a task directly inside any folder**: the "+ New" menu gained
+  "New Task" (alongside the existing New Note/New Folder), and the
+  folder right-click menu now offers both "New Note" and "New Task",
+  creating into that folder with it shown read-only in the dialog.
+  `TaskCreateRequest.Folder` (REST) and `create_task`'s new `folder`
+  argument (MCP) do the same server-side.
+
+### Changed — Complete replaces Archive
+
+- **`ITaskService.CompleteAsync`** replaces `ArchiveAsync`: sets the
+  task's status to the new `Tasks:CompletedStatus` (default `Done`) and
+  moves its note into a `Completed` subfolder *next to it* — e.g.
+  `Task/ProjectX/My Task.md` → `Task/ProjectX/Completed/My Task.md` —
+  rather than v0.2.0's single vault-wide `<Folder>/archive/`. Created if
+  missing, `" (2)"`-suffixed on a name collision, never overwrites,
+  idempotent if the task is already in a Completed folder, wikilinks
+  rewritten via `IVaultReorganizationService`. Dragging a card to the
+  Done column is unaffected by this change and still only changes
+  `status` — it does not move the file; only Complete does.
+  `TaskItem.Archived` is renamed `TaskItem.Completed`; completed tasks
+  stay indexed (ids are never reused) but are excluded from list/board/
+  search unless asked for.
+- **Task discovery is folder-agnostic**: tasks are found in any vault
+  folder (not just `Tasks:Folder`), and any path with a directory
+  segment named exactly `Completed` (case-sensitive) is treated as
+  completed and hidden accordingly — consistent with how `Tasks:Folder`
+  itself was already "just the default for new tasks," not the only
+  place tasks can live.
+- **REST**: `POST /api/tasks/{id}/complete` (new); `POST
+  .../archive` kept as a deprecated alias calling the same handler.
+  `includeCompleted` query param (`includeArchived` still accepted).
+  Task JSON's `archived` field is renamed `completed`. `GET
+  /api/tasks/config` adds `backlogStatus`, `completedStatus`,
+  `completedFolder: "Completed"`; `statuses` reports the effective list
+  with Backlog first; `folder` defaults to `"Task"`. Board columns gain
+  `isBacklog`.
+- **MCP**: new `complete_task(id)` tool; `archive_task` kept as a
+  deprecated alias (its description says so). `create_task` gains
+  optional `folder`; `list_tasks`/`search_tasks` gain `includeCompleted`
+  (`includeArchived` still works). `TaskWorkflowGuide` updated to
+  describe Complete instead of Archive and the Backlog column.
+- **Frontend**: the task modal's red Archive button is now a green
+  Complete button (`.mini-modal-btn-success`); Kanban cards gained the
+  same button directly on the card (doesn't start a drag or open the
+  modal). "All Tasks"' "Show archived" is now "Show completed". Backlog
+  cards whose raw status isn't literally "Backlog" show a small status
+  badge. The board scrolls horizontally now that there's a fifth+
+  column.
+
+### Changed — default Tasks folder is `Task`, not `tasks`
+
+- `Tasks:Folder` now defaults to `Task` (capital T) instead of `tasks`,
+  for consistent capitalization with the app's other top-level vault
+  folders. `docker-compose.yml`, `.env.example`, and the Podman Quadlet
+  unit updated to match.
+- **Startup migration** (idempotent; runs after the vault root is
+  confirmed to exist and before the file watcher's initial scan; any
+  failure is logged and swallowed rather than blocking startup):
+  1. *Folder rename* — only when `Tasks:Folder` is left at `Task`, so a
+     custom folder name is never touched: a root-level folder named
+     exactly (case-sensitive) `task` or `tasks` from v0.2.0 is
+     renamed/merged into `Task`. A user's own `Tasks`/`TASKS` folder is
+     not matched. A `task` → `Task` (case-only) rename always hops
+     through a temporary name so it works on case-insensitive filesystems
+     (Windows/macOS) too.
+  2. *Archive → Completed* — `<Tasks:Folder>/archive` (exact name) is
+     merged into `<Tasks:Folder>/Completed`. This step runs for **whatever
+     `Tasks:Folder` is configured**, not only `Task`, so tasks archived
+     under v0.2.0 stay completed even when the folder rename is skipped.
+  Folder and subfolder moves (and `.md` notes moved during a merge) go
+  through `IVaultReorganizationService`, so path-qualified wikilinks are
+  rewritten; non-`.md` files found inside a merged legacy folder (images,
+  attachments) are moved directly with the filesystem, and if a
+  reorganization-service hop ever fails during a case-only rename it
+  falls back to a raw `Directory.Move` (which does not rewrite links).
+  Never clobbers an existing file/folder on a name collision (logs a
+  warning and leaves the legacy item in place instead); the legacy
+  folder is removed only once it's empty. No marker file is written, so
+  a *new* folder named exactly `task`/`tasks` (or `<Folder>/archive`)
+  created later will be migrated again on the next restart — see
+  `docs/KNOWN-ISSUES.md`.
+
+### Upgrading from v0.2.0
+
+- If you never set `Tasks__Folder` / `TASKS_FOLDER`, nothing to do — the
+  new default `Task` plus the automatic migration above handle it.
+- If you **explicitly** set `Tasks__Folder=tasks` (an older
+  `deploy/podman/dotnotes.container` Quadlet unit or a `.env` with
+  `TASKS_FOLDER=tasks` did exactly this), either remove that override to
+  adopt `Task` and let the migration rename your folder, **or** keep it:
+  your folder is left alone, and your old `tasks/archive` tasks are still
+  migrated into `tasks/Completed` so they stay completed.
+
+### Deprecated
+
+- `POST /api/tasks/{id}/archive` (use `/complete`) and the MCP
+  `archive_task` tool (use `complete_task`) — both still work, calling
+  straight through to the new Complete behavior.
+- `includeArchived` on `GET /api/tasks`/`/board` and the `list_tasks`/
+  `search_tasks` MCP tools (use `includeCompleted`) — still accepted.
+- Task JSON's `archived` field (use `completed`) is removed, not kept
+  as an alias, since it's a response field rather than a request
+  parameter — no client can accidentally send the old name.
+
 ## v0.2.0 — Tasks & Kanban, Pomodoro, task MCP tools (2026-09-24)
 
 A task tracker inside the vault, ported from
