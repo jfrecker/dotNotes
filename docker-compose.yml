@@ -28,6 +28,11 @@ services:
       Server__Port: "5175"
       Sharing__Enabled: "${SHARING_ENABLED:-true}"
       Mcp__Enabled: "${MCP_ENABLED:-true}"
+      # Tasks & Kanban (README "Tasks & Kanban"). Custom board statuses:
+      # add Tasks__Statuses__0, Tasks__Statuses__1, ... here (they replace
+      # the default To Do / In Progress / Done list as a whole).
+      Tasks__Folder: "${TASKS_FOLDER:-tasks}"
+      Tasks__IdPrefix: "${TASKS_ID_PREFIX:-TASK}"
       # uid/gid the container's dotnet process runs as - defaults to the
       # image's built-in "app" user (1654:1654) with no .env file. Set
       # PUID/PGID in a .env file (see .env.example) to your own host

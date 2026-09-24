@@ -2,6 +2,96 @@
 
 All notable changes to dotNotes are recorded here, most recent first.
 
+## v0.2.0 — Tasks & Kanban, Pomodoro, task MCP tools (2026-09-24)
+
+A task tracker inside the vault, ported from
+[Backlog.md](https://github.com/MrLesk/Backlog.md)'s task model (MIT —
+see `NOTICE`): a task **is a note** with YAML frontmatter, so it stays a
+plain, hand-editable `.md` file. Full design, feature inventory and every
+autonomous judgement call: `docs/features/tasks-kanban/PLAN.md`
+(Phase 12 in `docs/01-PROJECT-PLAN.md`).
+
+### Added — tasks as notes
+
+- **Task files** use Backlog.md-compatible frontmatter (`id`, `title`,
+  `status`, `assignee`, `labels`, `priority`, `milestone`,
+  `dependencies`, `created_date`, `updated_date`, `ordinal`) and section
+  markers (`<!-- SECTION:DESCRIPTION:BEGIN -->`, `<!-- AC:BEGIN -->`, plan,
+  notes, final summary). Unknown keys and unrecognised body content are
+  preserved verbatim. A note is a task when its frontmatter has `id` and
+  `status`; notes without task frontmatter behave exactly as before.
+- **New tasks** are written to the configurable `tasks/` folder as
+  `TASK-12 - Title.md`. Ids are never reused (archived tasks count).
+  Renaming a task from the panel or the editor's title field renames the
+  file and rewrites incoming `[[wikilinks]]`.
+- **`DotNotes.Core.Tasks`**: `TaskMarkdown` (parse/serialize, YamlDotNet
+  for reading, own emitter for writing), `InMemoryTaskIndex` (a derived
+  cache fed by the existing file watcher, like the link/search indexes),
+  `TaskService` (create/update/move/archive/convert, all writes
+  serialised, patch semantics so board edits merge with editor edits),
+  `TaskOrdering` (Backlog.md's 1000-step ordinals with midpoint insert and
+  rebalance).
+- **Configuration** (`Tasks` section / `Tasks__*` env vars):
+  `Folder`, `IdPrefix`, `Statuses`, `DefaultStatus`, `Priorities`;
+  passthrough for folder and prefix in `docker-compose.yml`,
+  `.env.example`, the Podman unit and `DEPLOYMENT.md`.
+
+### Added — UI
+
+- **TASKS** sidebar section above *Folders & Notes* with **All Tasks** and
+  **Kanban Board** and an active-task count.
+- **Kanban Board**: columns from the configured statuses with count
+  badges, cards (title, id, excerpt, assignee, labels, priority,
+  acceptance-criteria progress, created date), drag-and-drop between and
+  within columns (persisted in `ordinal`), text/label/assignee/priority
+  filters, `+ New Task`, live refresh (revision polling).
+- **Task panel**: every field, interactive acceptance-criteria checklist,
+  plan/notes/final summary, *Open note*, Archive.
+- **All Tasks** table: sortable, filterable, optional archived rows.
+- **Convert to task** in the note right-click menu (never automatic).
+  Task notes preview without their raw YAML and with a compact task
+  header.
+- **Pomodoro timer** (top right of the board): adjustable focus/short/long
+  durations and cycles before a long break; start/pause/reset/skip;
+  countdown and phase; chime and/or browser notification; optional linked
+  task; settings and state persist in `localStorage`; keeps running across
+  in-app navigation with a compact top-bar indicator.
+
+### Added — REST and MCP
+
+- **`/api/tasks`** endpoints (config, list, board, revision, get, create,
+  patch, move, archive, convert) — `docs/04-API-SPEC.md`.
+- **MCP tools** `list_tasks`, `get_task`, `create_task`, `update_task`
+  (fields, status, acceptance-criteria add/remove/check/uncheck,
+  plan/notes set/append, final summary), `move_task` (status + position),
+  `archive_task`, `get_board`, `search_tasks`, `get_task_workflow`, plus
+  the resource `dotnotes://workflow/tasks` — `docs/05-MCP-SPEC.md`. The
+  existing MCP tools are unchanged.
+
+### Changed — concurrent edits
+
+- **`PUT /api/notes/{path}`** accepts an optional `expectedUpdatedAt`; a
+  stale value returns `409 conflict` with `currentUpdatedAt`. The editor
+  sends it and offers *Reload latest* or *Keep mine* instead of silently
+  overwriting a change made from the board or an MCP client. Omitting it
+  keeps last-write-wins, so `update_note` and older clients are unaffected.
+  The check is best-effort (check-then-write).
+
+### Changed — version
+
+- Version is now defined once, in the new `Directory.Build.props`
+  (`0.2.0`); `GET /api/config` and `get_config` report the real version
+  (previously the SDK default `1.0.0.0`) and add `features.tasks`. The
+  sidebar footer shows it and the Docker image carries an OCI version
+  label. Compose/Podman image tags are unchanged.
+
+### Fixed during development
+
+- Configured `Tasks:Statuses` are bound as a replacement for, not an
+  append to, the built-in list (a .NET configuration-binder gotcha).
+- Task timestamps from the startup scan use the file's real modification
+  time.
+
 ## Unreleased — folder delete, sidebar drag fix, Podman support (2026-09-19)
 
 Two bug fixes from real use plus Podman as a first-class runtime

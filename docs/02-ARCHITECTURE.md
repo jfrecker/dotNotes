@@ -37,6 +37,7 @@ src/
     Links/                      # wikilink parser, backlink index, graph model
     Search/                     # ISearchIndex + InMemorySearchIndex ( + optional LuceneSearchIndex)
     Sharing/                    # share token store
+    Tasks/                      # Phase 12: Tasks & Kanban (ITaskIndex/ITaskService, TaskMarkdown frontmatter+section parsing)
     Config/                    # strongly-typed options classes + VaultPathValidator (resolves/creates the vault root at startup, framework-free)
 tests/
   DotNotes.Core.Tests/
@@ -75,6 +76,15 @@ Environment-variable-overridable `appsettings.json`, e.g.:
 
 Docker overrides these with `Vault__RootPath`, `Server__Port`, etc.
 (ASP.NET Core's double-underscore convention for nested config keys).
+
+Phase 12 (Tasks & Kanban) adds a `Tasks` section (`Folder`, `IdPrefix`,
+`Statuses`, `DefaultStatus`, `Priorities` - see docs/06-DATA-MODEL.md's
+"Tasks" section for the full schema) and a `YamlDotNet` dependency in
+`DotNotes.Core` used strictly to *parse* a task note's YAML frontmatter;
+the on-disk layout is always written by `DotNotes.Core.Tasks.TaskMarkdown`'s
+own small emitter (matching Backlog.md's field order/quoting), never by
+YamlDotNet's emitter, so `DotNotes.Core` still has zero ASP.NET Core
+dependency and diffs stay minimal.
 
 ## Non-functional notes
 

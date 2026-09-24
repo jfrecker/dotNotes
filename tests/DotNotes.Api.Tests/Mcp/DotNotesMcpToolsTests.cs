@@ -527,6 +527,7 @@ public sealed class DotNotesMcpToolsTests : IDisposable
         Assert.Equal(sharingEnabled, config.Features.Sharing);
         Assert.Equal(mcpEnabled, config.Features.Mcp);
         Assert.True(config.Features.Graph);
+        Assert.True(config.Features.Tasks);
         Assert.Equal(1500, config.AutosaveDelayMs);
     }
 }

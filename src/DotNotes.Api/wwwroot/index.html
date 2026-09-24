@@ -86,6 +86,16 @@
       >
         Graph view
       </a>
+      <!-- Compact Pomodoro indicator (js/pomodoro.js), shown only while a
+           timer is running and the Kanban board isn't the active view -
+           docs/features/tasks-kanban/PLAN.md §5/§9. Clicking it navigates
+           to the board. -->
+      <button
+        id="pomodoro-nav-indicator"
+        type="button"
+        class="pomodoro-nav-indicator hidden"
+        title="Open the Kanban board"
+      ></button>
       <button
         id="theme-toggle-btn"
         type="button"
@@ -121,6 +131,24 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
               </svg>
               New
+            </button>
+          </div>
+
+          <!-- "TASKS" section (docs/features/tasks-kanban/PLAN.md §5) - two
+               nav rows above "Folders & Notes", each with an active
+               (non-archived) task-count badge; js/tasks.js owns the counts
+               and which row is highlighted, this is just the static shell. -->
+          <div class="sidebar-subheader flex items-center px-2">
+            <span>Tasks</span>
+          </div>
+          <div id="tasks-nav" class="tasks-nav">
+            <button id="tasks-nav-all-btn" type="button" class="tasks-nav-row" data-tasks-view="list">
+              <span class="tasks-nav-row-label">All Tasks</span>
+              <span id="tasks-nav-all-count" class="tasks-nav-count">0</span>
+            </button>
+            <button id="tasks-nav-board-btn" type="button" class="tasks-nav-row" data-tasks-view="board">
+              <span class="tasks-nav-row-label">Kanban Board</span>
+              <span id="tasks-nav-board-count" class="tasks-nav-count">0</span>
             </button>
           </div>
 
@@ -172,6 +200,12 @@
 
           <div id="file-tree" class="flex-1 overflow-y-auto p-2 text-sm">
             <p class="px-1 py-2 text-slate-400">Loading…</p>
+          </div>
+
+          <!-- Version readout (docs/features/tasks-kanban/PLAN.md §10) -
+               fetched once from GET /api/config by js/tasks.js. -->
+          <div id="sidebar-footer" class="sidebar-footer">
+            <span id="app-version-label"></span>
           </div>
         </aside>
 
@@ -412,8 +446,87 @@
                    much total width those percentages are dividing up. -->
               <div id="split-divider" class="split-divider" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview panes"></div>
               <section id="preview-pane" class="overflow-y-auto bg-white">
+                <!-- Compact task header (docs/features/tasks-kanban/PLAN.md
+                     §5's "Notes integration"): shown instead of the raw YAML
+                     block whenever the open note has task frontmatter -
+                     js/tasks.js's renderTaskPreviewHeader/hideTaskPreviewHeader,
+                     called from js/app.js's renderPreviewNow. -->
+                <div id="task-preview-header" class="task-preview-header hidden"></div>
                 <div id="preview" class="note-preview p-6"></div>
               </section>
+            </div>
+          </section>
+
+          <!-- Kanban board (docs/features/tasks-kanban/PLAN.md §5) - shown
+               instead of home-view/note-editor-view via js/tasks.js's
+               showBoard/hide, wired from js/app.js's view-switching. -->
+          <section id="tasks-board-view" class="tasks-view hidden">
+            <div class="tasks-view-header">
+              <h2 class="tasks-view-title">Kanban Board</h2>
+              <!-- Pomodoro sits top-right (after the title's margin-right:auto);
+                   the filters wrap to their own row below. -->
+              <div id="pomodoro-widget" class="pomodoro-widget"></div>
+              <div id="tasks-board-filters" class="tasks-filters tasks-filters-row">
+                <input id="tasks-board-search" type="text" class="tasks-filter-input" placeholder="Search tasks…" autocomplete="off" />
+                <select id="tasks-board-label-filter" class="tasks-filter-select" aria-label="Filter by label">
+                  <option value="">All labels</option>
+                </select>
+                <select id="tasks-board-assignee-filter" class="tasks-filter-select" aria-label="Filter by assignee">
+                  <option value="">All assignees</option>
+                </select>
+                <select id="tasks-board-priority-filter" class="tasks-filter-select" aria-label="Filter by priority">
+                  <option value="">All priorities</option>
+                </select>
+                <button id="tasks-board-new-btn" type="button" class="new-menu-btn">+ New Task</button>
+              </div>
+            </div>
+            <p id="tasks-board-error" class="tasks-view-error hidden"></p>
+            <div id="tasks-board-columns" class="tasks-board-columns"></div>
+          </section>
+
+          <!-- All Tasks (docs/features/tasks-kanban/PLAN.md §5) - sortable/
+               filterable table, same show/hide treatment as the board. -->
+          <section id="tasks-list-view" class="tasks-view hidden">
+            <div class="tasks-view-header">
+              <h2 class="tasks-view-title">All Tasks</h2>
+              <div id="tasks-list-filters" class="tasks-filters">
+                <input id="tasks-list-search" type="text" class="tasks-filter-input" placeholder="Search tasks…" autocomplete="off" />
+                <select id="tasks-list-status-filter" class="tasks-filter-select" aria-label="Filter by status">
+                  <option value="">All statuses</option>
+                </select>
+                <select id="tasks-list-label-filter" class="tasks-filter-select" aria-label="Filter by label">
+                  <option value="">All labels</option>
+                </select>
+                <select id="tasks-list-assignee-filter" class="tasks-filter-select" aria-label="Filter by assignee">
+                  <option value="">All assignees</option>
+                </select>
+                <select id="tasks-list-priority-filter" class="tasks-filter-select" aria-label="Filter by priority">
+                  <option value="">All priorities</option>
+                </select>
+                <label class="tasks-list-archived-toggle">
+                  <input id="tasks-list-show-archived" type="checkbox" />
+                  Show archived
+                </label>
+                <button id="tasks-list-new-btn" type="button" class="new-menu-btn">+ New Task</button>
+              </div>
+            </div>
+            <p id="tasks-list-error" class="tasks-view-error hidden"></p>
+            <div class="tasks-list-table-wrap">
+              <table id="tasks-list-table" class="tasks-list-table">
+                <thead>
+                  <tr>
+                    <th data-sort-key="id"><button type="button" class="tasks-list-sort-btn">ID</button></th>
+                    <th data-sort-key="title"><button type="button" class="tasks-list-sort-btn">Title</button></th>
+                    <th data-sort-key="status"><button type="button" class="tasks-list-sort-btn">Status</button></th>
+                    <th data-sort-key="priority"><button type="button" class="tasks-list-sort-btn">Priority</button></th>
+                    <th data-sort-key="labels"><button type="button" class="tasks-list-sort-btn">Labels</button></th>
+                    <th data-sort-key="assignee"><button type="button" class="tasks-list-sort-btn">Assignee</button></th>
+                    <th data-sort-key="milestone"><button type="button" class="tasks-list-sort-btn">Milestone</button></th>
+                    <th data-sort-key="createdDate"><button type="button" class="tasks-list-sort-btn">Created</button></th>
+                  </tr>
+                </thead>
+                <tbody id="tasks-list-tbody"></tbody>
+              </table>
             </div>
           </section>
         </main>
@@ -490,6 +603,91 @@
     </div>
   </div>
 
+  <!-- Task modal (docs/features/tasks-kanban/PLAN.md §5) - create/edit a
+       task, reusing the .mini-modal-* field/button styling but as its own
+       larger overlay/panel (js/tasks.js drives all of this). -->
+  <div id="task-modal" class="task-modal-overlay hidden">
+    <div class="task-modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title-input">
+      <div class="task-modal-header">
+        <input
+          id="task-modal-title-input"
+          type="text"
+          class="task-modal-title-input"
+          placeholder="Task title"
+          autocomplete="off"
+        />
+        <button id="task-modal-close-btn" type="button" class="share-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <p id="task-modal-error" class="mini-modal-error hidden"></p>
+      <div class="task-modal-body">
+        <div class="task-modal-row">
+          <label class="task-modal-field">
+            <span class="mini-modal-label">Status</span>
+            <select id="task-modal-status" class="mini-modal-input"></select>
+          </label>
+          <label class="task-modal-field">
+            <span class="mini-modal-label">Priority</span>
+            <select id="task-modal-priority" class="mini-modal-input"></select>
+          </label>
+          <label class="task-modal-field">
+            <span class="mini-modal-label">Milestone</span>
+            <input id="task-modal-milestone" type="text" class="mini-modal-input" autocomplete="off" />
+          </label>
+        </div>
+        <div class="task-modal-row">
+          <label class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Assignee</span>
+            <div id="task-modal-assignee-chips" class="task-chip-input"></div>
+          </label>
+          <label class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Labels</span>
+            <div id="task-modal-labels-chips" class="task-chip-input"></div>
+          </label>
+        </div>
+        <label class="task-modal-field task-modal-field-wide">
+          <span class="mini-modal-label">Dependencies</span>
+          <div id="task-modal-dependencies-chips" class="task-chip-input"></div>
+        </label>
+        <label class="task-modal-field task-modal-field-wide">
+          <span class="mini-modal-label">Description</span>
+          <textarea id="task-modal-description" class="task-modal-textarea" rows="4"></textarea>
+        </label>
+        <div class="task-modal-field task-modal-field-wide">
+          <span class="mini-modal-label">Acceptance Criteria</span>
+          <ul id="task-modal-ac-list" class="task-ac-list"></ul>
+          <div class="task-ac-add-row">
+            <input id="task-modal-ac-new" type="text" class="mini-modal-input" placeholder="Add acceptance criterion…" autocomplete="off" />
+            <button id="task-modal-ac-add-btn" type="button" class="mini-modal-btn">Add</button>
+          </div>
+        </div>
+        <details class="task-modal-more">
+          <summary>More</summary>
+          <label class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Implementation Plan</span>
+            <textarea id="task-modal-plan" class="task-modal-textarea" rows="3"></textarea>
+          </label>
+          <label class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Implementation Notes</span>
+            <textarea id="task-modal-notes" class="task-modal-textarea" rows="3"></textarea>
+          </label>
+          <label class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Final Summary</span>
+            <textarea id="task-modal-summary" class="task-modal-textarea" rows="3"></textarea>
+          </label>
+        </details>
+        <p id="task-modal-meta" class="task-modal-meta"></p>
+      </div>
+      <div class="task-modal-footer">
+        <a id="task-modal-open-note-link" href="#" class="task-modal-open-note-link">Open note</a>
+        <div class="task-modal-footer-actions">
+          <button id="task-modal-archive-btn" type="button" class="mini-modal-btn mini-modal-btn-danger hidden">Archive</button>
+          <button id="task-modal-cancel-btn" type="button" class="mini-modal-btn">Cancel</button>
+          <button id="task-modal-save-btn" type="button" class="mini-modal-btn mini-modal-btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Vendored libraries (wwwroot/lib/, served locally — no CDN at runtime) -->
   <script src="/lib/marked/marked.umd.js"></script>
   <script src="/lib/highlightjs/highlight.min.js"></script>
@@ -503,6 +701,8 @@
   <script src="/js/menu.js"></script>
   <script src="/js/tree.js"></script>
   <script src="/js/search.js"></script>
+  <script src="/js/pomodoro.js"></script>
+  <script src="/js/tasks.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

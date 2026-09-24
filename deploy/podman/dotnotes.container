@@ -76,6 +76,8 @@ Environment=Vault__RootPath=/data/vault
 Environment=Server__Port=5175
 Environment=Sharing__Enabled=true
 Environment=Mcp__Enabled=true
+Environment=Tasks__Folder=tasks
+Environment=Tasks__IdPrefix=TASK
 
 [Service]
 Restart=always

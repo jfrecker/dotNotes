@@ -177,6 +177,88 @@
   structure to callers, so swapping in `Lucene.NET` later only touches
   the implementation, not `SearchEndpoints.cs` or the MCP tool.
 
+## Tasks
+
+Full contract: docs/features/tasks-kanban/PLAN.md §2/§3. Summary:
+
+- **A task is a note**, recognised by frontmatter, not location: the file
+  starts (optionally after a BOM, CRLF-tolerant) with a `---` line, a
+  closing `---` line, the block parses as a YAML mapping, and it has
+  non-empty scalar `id` **and** `status` keys.
+- **Frontmatter schema** (Backlog.md's field names/order): `id, title,
+  status, assignee (list), reporter, created_date, updated_date, labels
+  (list), milestone, dependencies (list), priority, ordinal`. Unknown keys
+  are preserved verbatim (captured as their original YAML source text) and
+  re-emitted after the known keys, in original order. Dates are
+  `'yyyy-MM-dd HH:mm'` UTC, single-quoted; `ordinal` is a plain number
+  (integer text when whole). `DotNotes.Core.Tasks.TaskMarkdown` parses with
+  YamlDotNet but always *writes* frontmatter with its own emitter so the
+  layout matches Backlog.md and stays diff-minimal; the body is edited by
+  character span (never rebuilt), so unrecognised content round-trips
+  byte-for-byte.
+- **Tolerant reading, faithful writing.** Each unknown key's raw text is
+  sliced from its key's line to the next top-level entry, so block/flow
+  mappings, nested sequences, block/multi-line-quoted scalars and interleaved
+  comments survive every rewrite; line endings are normalised to `\n`. A
+  scalar where a list is expected (`labels: bug`, `assignee: '@me'`) is a
+  one-item list (never comma-split); a null/empty list key is an empty list.
+  A known key whose value can't be represented (`created_date: yesterday`,
+  non-numeric `ordinal`, a mapping where a list belongs) is preserved verbatim
+  under its original key and re-emitted in its normal slot until a real edit
+  supplies a typed value.
+- **Single-line values.** The task service collapses line-break/tab/control
+  runs in `title`, `labels`, `assignee`, `milestone` and `dependencies` to one
+  space (trimmed; empty list items dropped). As a second line of defence the
+  emitter double-quotes (YAML `\n`/`\t`/`\uXXXX` escapes) any scalar with a
+  control character or `:` + non-space whitespace, and every write is
+  serialised and re-parsed *before* touching disk - a value that wouldn't
+  round-trip raises an error instead of leaving an unparseable file.
+- **Duplicate ids.** If two files carry the same task id (e.g. a copied
+  file), the index resolves the id to the lowest path (ordinal,
+  case-insensitive) and falls back to the other file when one is deleted or
+  changes id; both files stay visible as separate tasks in lists/boards.
+- **Body sections** use Backlog.md's sentinel-comment markers: `##
+  Description` (`<!-- SECTION:DESCRIPTION:BEGIN/END -->`), `## Acceptance
+  Criteria` (`<!-- AC:BEGIN/END -->`, items `- [ ] #n text`, renumbered on
+  every write), `## Implementation Plan`/`## Implementation Notes`/`##
+  Final Summary` (their own `SECTION:*` markers). `## Definition of Done`
+  and `## Comments` are recognised only enough to preserve their position
+  and content verbatim - v1 never edits them. A task with no Description
+  markers uses the free body text outside any other recognised section as
+  its description (so a converted note keeps its existing text); setting a
+  description on such a note wraps that text in markers, replacing it.
+- **Filename:** `<ID> - <Title>.md` in the task's current folder (title
+  sanitised per dotNotes' existing name rules, capped at 80 characters).
+  Changing a task's title through the task API renames the file via
+  `IVaultReorganizationService` (wikilinks rewritten) - but only when the
+  current file name is still id-derived; a manually-renamed file's title
+  is updated in frontmatter only, per usual "one code path" rules.
+- **IDs:** `<Tasks:IdPrefix>-<N>` (default prefix `TASK`), `N` = 1 + the
+  max numeric top-level id over *all* tasks including archived
+  (case-insensitive prefix match; dotted subtask ids like `TASK-5.1` are
+  ignored for the max). IDs are never reused.
+- **Ordering:** `ordinal` (double) ascending, missing last, then
+  `created_date` ascending, then numeric id. A new task's ordinal is the
+  max in its column + 1000 (or 1000 if the column is empty). Moving to
+  index *i* uses the midpoint of its new neighbours (top = next/2, bottom
+  = prev+1000); if a neighbour lacks an ordinal or the gap is smaller than
+  `1e-6`, the whole column is renumbered 1000, 2000, ... and only the
+  files whose ordinal actually changed are written.
+- **Archive:** a task is archived by moving its note to
+  `<Tasks:Folder>/archive/` via `IVaultReorganizationService` (wikilinks
+  rewritten); any task whose path is under that folder is `archived` and
+  excluded from list/board results unless explicitly included. Dependency
+  lists are left untouched (ids are never reused, so they stay meaningful).
+- **Unknown status:** the board shows an extra trailing column for any
+  status present on a task that isn't in the configured `Tasks:Statuses`
+  list, rather than hiding it. Moving/reordering within such a column (and
+  re-saving a task with its current status) is allowed; creating a task with,
+  or switching one to, a brand-new unknown status is rejected.
+- **Index:** `InMemoryTaskIndex : ITaskIndex : IVaultChangeListener`, fed
+  by the same `VaultWatcherService`/`VaultReorganizationService` fan-out as
+  the link and search indexes. A monotonically increasing `Revision` bumps
+  only on a task-affecting change; pure cache, rebuildable from disk.
+
 ## Share tokens
 
 - `.nd-shares.json`: `{ "<token>": { "path": "...", "expiresAt": "..."|null } }`.

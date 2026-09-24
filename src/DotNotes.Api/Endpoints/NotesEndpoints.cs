@@ -213,6 +213,36 @@ public static class NotesEndpoints
 
         try
         {
+            // Optimistic concurrency (opt-in): docs/features/tasks-kanban/PLAN.md
+            // §3 "Concurrent edits" - a caller (the editor) that supplies
+            // `expectedUpdatedAt` is asking to fail loudly instead of
+            // silently clobbering a newer on-disk version (e.g. one the
+            // board/MCP just wrote). Omitting it keeps the pre-existing
+            // last-write-wins behaviour for MCP's update_note and older
+            // clients.
+            if (body.ExpectedUpdatedAt is { } expected)
+            {
+                var current = await noteRepository.GetAsync(path, cancellationToken).ConfigureAwait(false);
+                if (current is null)
+                {
+                    // Judgment call (docs/04-API-SPEC.md doesn't cover this
+                    // case explicitly): the note the editor loaded no
+                    // longer exists - deleted or renamed out from under
+                    // it - which is exactly the "your copy is stale"
+                    // situation `expectedUpdatedAt` exists to catch, so
+                    // this is a 409 (with no `currentUpdatedAt` to report)
+                    // rather than silently recreating the note or 404ing
+                    // (which the editor would otherwise treat as "not
+                    // found" rather than "reload or overwrite").
+                    return Conflict("The note no longer exists at this path; it may have been deleted or moved.", currentUpdatedAt: null);
+                }
+
+                if (NoteConcurrency.HasConflict(expected, current.UpdatedAt))
+                {
+                    return Conflict("The note was modified since it was last loaded.", current.UpdatedAt);
+                }
+            }
+
             var result = await noteRepository.SaveAsync(path, body.Content, cancellationToken).ConfigureAwait(false);
             return Results.Ok(new NoteWriteResponse(result.Path, result.UpdatedAt));
         }
@@ -295,8 +325,28 @@ public static class NotesEndpoints
             new ErrorResponse(error, detail),
             statusCode: StatusCodes.Status400BadRequest);
 
+    /// <summary>
+    /// <c>PUT /api/notes/{**path}</c>'s optimistic-concurrency conflict -
+    /// see <see cref="NoteConcurrency"/> and this method's caller. Carries
+    /// an extra <c>currentUpdatedAt</c> field (the note's actual current
+    /// timestamp, so the editor can decide whether to reload or force an
+    /// overwrite) beyond the standard <see cref="ErrorResponse"/> shape,
+    /// hence its own dedicated record rather than reusing that one.
+    /// </summary>
+    private static IResult Conflict(string detail, DateTimeOffset? currentUpdatedAt) =>
+        Results.Json(
+            new ConflictErrorResponse("conflict", detail, currentUpdatedAt),
+            statusCode: StatusCodes.Status409Conflict);
+
     /// <summary>Standard error shape per docs/04-API-SPEC.md's Conventions section.</summary>
     private sealed record ErrorResponse(string Error, string? Detail = null);
+
+    /// <summary>
+    /// Error shape for <c>PUT /api/notes/{**path}</c>'s 409 conflict
+    /// response: the standard <c>{ error, detail }</c> plus
+    /// <c>currentUpdatedAt</c> - see <see cref="Conflict"/>.
+    /// </summary>
+    private sealed record ConflictErrorResponse(string Error, string? Detail, DateTimeOffset? CurrentUpdatedAt);
 
     /// <summary>Backs <c>GET /api/notes</c>.</summary>
     private sealed record NoteTreeEntryResponse(
@@ -318,8 +368,13 @@ public static class NotesEndpoints
     /// <summary>Backs the <c>{ path, updatedAt }</c> response of <c>PUT /api/notes/{**path}</c>.</summary>
     private sealed record NoteWriteResponse(string Path, DateTimeOffset UpdatedAt);
 
-    /// <summary>Request body shape for <c>PUT /api/notes/{**path}</c>: <c>{ content }</c>.</summary>
-    private sealed record UpdateNoteRequest(string? Content);
+    /// <summary>
+    /// Request body shape for <c>PUT /api/notes/{**path}</c>:
+    /// <c>{ content, expectedUpdatedAt? }</c>. <c>ExpectedUpdatedAt</c> is
+    /// the opt-in optimistic-concurrency check per
+    /// docs/features/tasks-kanban/PLAN.md §3 - see <see cref="PutNoteAsync"/>.
+    /// </summary>
+    private sealed record UpdateNoteRequest(string? Content, DateTimeOffset? ExpectedUpdatedAt);
 
     /// <summary>
     /// Backs the <c>{ path, updatedAt, rewrittenNotes }</c> response of

@@ -33,6 +33,40 @@ name validation and index consistency can't differ between the two
 surfaces. See `docs/06-DATA-MODEL.md`'s "Folder & note move/rename"
 section for the rewrite rules.
 
+### Tasks & Kanban (docs/features/tasks-kanban/PLAN.md §6)
+
+Implemented as a separate `DotNotesTaskMcpTools` (`McpServerToolType`),
+calling straight into the same `ITaskService` the `/api/tasks/*` REST
+endpoints use.
+
+| Tool | Arguments | Returns | Behaviour |
+|---|---|---|---|
+| `list_tasks` | `status?, label?, assignee?, priority?, milestone?, includeArchived?, limit?` | `TaskSummary[]` | Same sort as the board (status column order, then ordinal) |
+| `get_task` | `id` | `Task` | Full task incl. description, acceptance criteria, plan, notes, final summary |
+| `create_task` | `title, description?, status?, priority?, assignee?[], labels?[], milestone?, dependencies?[], acceptanceCriteria?[]` | `Task` | Fails on an invalid status/priority (not in configuration) |
+| `update_task` | `id` + optional `title, status, priority, assignee[], labels[], milestone, dependencies[], description, acceptanceCriteriaAdd[], acceptanceCriteriaRemove[] (1-based), acceptanceCriteriaCheck[], acceptanceCriteriaUncheck[], planSet, planAppend, notesSet, notesAppend, finalSummary` | `Task` | Patch semantics: only supplied fields change; `""` clears `priority`, `milestone`, `description`, `planSet`, `notesSet` or `finalSummary` (but **not** `title`, which can't be empty - that is an error); arrays replace the whole list |
+| `move_task` | `id, status, index?, beforeId?` | `Task` | `beforeId` (another task's id in the destination column) inserts the task immediately before it and wins over `index`, a 0-based position among the column's *other* tasks; omit both for the end. Moving to where the task already is writes nothing |
+| `archive_task` | `id` | `Task` | Moves the note under `<Tasks:Folder>/archive/` |
+| `get_board` | `status?, label?, assignee?, priority?, milestone?` | `{ columns: [{ status, tasks: TaskSummary[] }] }` | One column per configured status, in order, plus a trailing column per unknown status in use |
+| `search_tasks` | `query, limit?` | `TaskSummary[]` | Substring/token match over id, title, description, labels, assignee |
+| `get_task_workflow` | — | markdown string | Same content as the `dotnotes://workflow/tasks` resource below, for clients that don't read resources |
+
+`TaskSummary` = `{ id, title, status, assignee[], labels[], priority, milestone, dependencies[], createdDate, updatedDate, ordinal, path, archived, excerpt, acTotal, acChecked }`.
+`Task` = `TaskSummary` + `{ description, acceptanceCriteria: [{ index, text, checked }], implementationPlan, implementationNotes, finalSummary, updatedAt }`.
+
+`create_task` fails if the request doesn't validate (empty title, or a
+`status`/`priority` outside this instance's configured lists) — the
+same `TaskValidationException` the REST endpoints translate to 400.
+`get_task`/`update_task`/`move_task`/`archive_task` fail with a
+structured MCP error if `id` doesn't match any task (same
+`TaskNotFoundException` the REST endpoints translate to 404).
+
+## Resources
+
+| Resource | MIME type | Content |
+|---|---|---|
+| `dotnotes://workflow/tasks` | `text/markdown` | The same task-workflow guide as the `get_task_workflow` tool: when to create a task, how to write it as a self-contained work order, the plan → implement → notes → verify → final-summary execution flow, and when to archive vs. move to Done. Registered via `DotNotesTaskWorkflowResource` (`[McpServerResourceType]`/`[McpServerResource]`, added with `WithResources<T>()`) — see that section's implementation note on the installed SDK version. |
+
 ## Transport
 
 HTTP transport at `/mcp` on the same host/port as the web app (so no
@@ -99,3 +133,30 @@ public class NoteTools(INoteRepository notes, ISearchIndex search)
     // get_recent_notes, get_config follow the same pattern.
 }
 ```
+
+### Resources (2.2.0)
+
+The installed SDK (`ModelContextProtocol` 2.2.0) supports MCP resources
+the same way it supports tools — attribute a method, register the
+containing type:
+
+```csharp
+[McpServerResourceType]
+public sealed class TaskWorkflowResource
+{
+    [McpServerResource(UriTemplate = "dotnotes://workflow/tasks", MimeType = "text/markdown")]
+    [Description("Guide for using dotNotes' task tools.")]
+    public string TasksWorkflow() => TaskWorkflowGuide.Markdown;
+}
+
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()
+    .WithTools<NoteTools>()
+    .WithResources<TaskWorkflowResource>();
+```
+
+A method returning a plain `string` is converted to a single
+`TextResourceContents` automatically — no manual `ReadResourceResult`
+construction needed, same "no manual JSON serialization" ergonomics
+tools get (see "Return values" above).
