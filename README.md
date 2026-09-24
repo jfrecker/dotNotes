@@ -423,7 +423,7 @@ contradicts it (see `CLAUDE.md`).
 - Targets **.NET 10 (LTS)**.
 - Deliberately **descopes multi-language UI and multi-user accounts** —
   see `docs/03-FEATURE-SPEC.md`'s "Explicitly descoped" section.
-- Version **0.2.1** — defined once in `Directory.Build.props`.
+- Version **0.2.2** — defined once in `Directory.Build.props`.
 - The MCP server uses the official `ModelContextProtocol` C# SDK
   (currently pre-1.0, pinned at `2.2.0`) — `docs/05-MCP-SPEC.md` has the
   full tool contract.

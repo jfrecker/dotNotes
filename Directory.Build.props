@@ -8,8 +8,8 @@
     Bump the MINOR for features, PATCH for fixes.
   -->
   <PropertyGroup>
-    <Version>0.2.1</Version>
-    <!-- Keep InformationalVersion a clean "0.2.1" (no "+<git sha>" suffix). -->
+    <Version>0.2.2</Version>
+    <!-- Keep InformationalVersion a clean "0.2.2" (no "+<git sha>" suffix). -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>

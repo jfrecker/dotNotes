@@ -147,7 +147,7 @@ docs/features/tasks-kanban/PLAN.md §2. `{id}` is a task id (e.g.
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/config` | `{ name, version, features: { sharing, mcp, graph, tasks }, autosaveDelayMs }` — `version` is the app's release version (e.g. `"0.2.1"`) |
+| GET | `/api/config` | `{ name, version, features: { sharing, mcp, graph, tasks }, autosaveDelayMs }` — `version` is the app's release version (e.g. `"0.2.2"`) |
 
 ## Conventions
 

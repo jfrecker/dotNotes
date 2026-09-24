@@ -2,7 +2,7 @@
 
 All notable changes to dotNotes are recorded here, most recent first.
 
-## Unreleased
+## v0.2.2 — New Subfolder (2026-09-24)
 
 ### Added — New Subfolder
 - **Folder right-click "New Subfolder":** creates a folder inside the

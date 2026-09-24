@@ -52,7 +52,7 @@ WORKDIR /app
 
 # Keep in sync with <Version> in Directory.Build.props.
 LABEL org.opencontainers.image.title="dotNotes" \
-      org.opencontainers.image.version="0.2.1" \
+      org.opencontainers.image.version="0.2.2" \
       org.opencontainers.image.licenses="MIT"
 
 # The aspnet base image ships a low-privilege "app" user/group

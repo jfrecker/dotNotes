@@ -50,9 +50,9 @@ public sealed class ConfigEndpointsTests : IDisposable
 
         Assert.NotNull(config);
         Assert.Equal("dotNotes", config!.Name);
-        // Directory.Build.props (repo root) sets <Version>0.2.1</Version>,
+        // Directory.Build.props (repo root) sets <Version>0.2.2</Version>,
         // reported via AssemblyInformationalVersionAttribute - see AppInfo.GetConfig.
-        Assert.Equal("0.2.1", config.Version);
+        Assert.Equal("0.2.2", config.Version);
         Assert.True(config.Features.Sharing);
         Assert.True(config.Features.Mcp);
         Assert.True(config.Features.Graph);
