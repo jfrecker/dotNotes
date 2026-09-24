@@ -72,24 +72,24 @@ public sealed class TasksEndpointsGapTests : IDisposable
     }
 
     [Fact]
-    public async Task MoveAndArchive_UnknownTask_Return404_UnknownStatusReturns400()
+    public async Task MoveAndComplete_UnknownTask_Return404_UnknownStatusReturns400()
     {
         await AssertErrorAsync(await _client.PostAsJsonAsync("/api/tasks/TASK-99/move", new { status = "Done" }), HttpStatusCode.NotFound, "not_found");
-        await AssertErrorAsync(await _client.PostAsync("/api/tasks/TASK-99/archive", null), HttpStatusCode.NotFound, "not_found");
+        await AssertErrorAsync(await _client.PostAsync("/api/tasks/TASK-99/complete", null), HttpStatusCode.NotFound, "not_found");
 
         await CreateAsync(new { title = "Movable" });
         await AssertErrorAsync(await _client.PostAsJsonAsync("/api/tasks/TASK-1/move", new { status = "Nowhere" }), HttpStatusCode.BadRequest, "invalid_request");
     }
 
     [Fact]
-    public async Task ArchiveTask_Twice_IsIdempotent()
+    public async Task CompleteTask_Twice_IsIdempotent()
     {
-        await CreateAsync(new { title = "Archive me" });
-        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync("/api/tasks/TASK-1/archive", null)).StatusCode);
-        var second = await _client.PostAsync("/api/tasks/TASK-1/archive", null);
+        await CreateAsync(new { title = "Complete me" });
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync("/api/tasks/TASK-1/complete", null)).StatusCode);
+        var second = await _client.PostAsync("/api/tasks/TASK-1/complete", null);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         var body = await second.Content.ReadFromJsonAsync<JsonElement>(Json);
-        Assert.Equal("tasks/archive/TASK-1 - Archive me.md", body.GetProperty("path").GetString());
+        Assert.Equal("Task/Completed/TASK-1 - Complete me.md", body.GetProperty("path").GetString());
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public sealed class TasksEndpointsGapTests : IDisposable
         // The board applies the same filters but always keeps every column.
         var board = await _client.GetFromJsonAsync<JsonElement>("/api/tasks/board?label=auth", Json);
         var columns = board.GetProperty("columns").EnumerateArray().ToArray();
-        Assert.Equal(3, columns.Length);
+        Assert.Equal(4, columns.Length);
         Assert.Equal(1, columns.Sum(c => c.GetProperty("tasks").GetArrayLength()));
     }
 

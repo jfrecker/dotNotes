@@ -589,6 +589,31 @@
   border-color: var(--color-danger);
 }
 
+/* "Complete task" actions (v0.2.1 - replaces the old red Archive button/
+   flow) - green like `--color-success`, but that token is a light mint in
+   dark mode (meant for small text, not a filled button), so dark-theme
+   text is dark instead of white to stay readable; light-theme text stays
+   white against the darker emerald. */
+.mini-modal-btn-success {
+  color: #fff;
+  background-color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.mini-modal-btn-success:hover {
+  background-color: #047857; /* emerald-700 */
+  border-color: #047857;
+}
+
+[data-theme="dark"] .mini-modal-btn-success {
+  color: #052e21;
+}
+
+[data-theme="dark"] .mini-modal-btn-success:hover {
+  background-color: #10b981; /* emerald-500 */
+  border-color: #10b981;
+}
+
 /* Generic disabled state for .icon-btn (favorite/star is permanently
    disabled - docs/03-FEATURE-SPEC.md's "Present in the UI but deliberately
    not implemented" - and any other icon button could plausibly need this
@@ -1665,7 +1690,7 @@ body {
   box-shadow: 0 0 0 2px var(--color-accent-surface);
 }
 
-.tasks-list-archived-toggle {
+.tasks-list-completed-toggle {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -1761,12 +1786,24 @@ body {
 .tasks-board-column {
   display: flex;
   flex-direction: column;
-  flex: 0 0 280px;
-  width: 280px;
+  /* v0.2.1: 4 default columns (Backlog first) must fit a ~1100px content
+     area without clipping the last one, so columns share the row equally
+     (min 220px - beyond that the board scrolls horizontally, max 340px so
+     a 1-2 column config doesn't stretch cards absurdly wide). */
+  flex: 1 1 240px;
+  min-width: 220px;
+  max-width: 340px;
   max-height: 100%;
   background-color: var(--color-surface-alt);
   border: 1px solid var(--color-border-subtle);
   border-radius: 0.5rem;
+}
+
+/* The always-present, leftmost Backlog column (v0.2.1) - a faint accent
+   border to set it apart as "where anything with no real status lands",
+   not a functional difference in how it accepts drops/creation. */
+.tasks-board-column-backlog {
+  border-color: var(--color-accent);
 }
 
 .tasks-board-column-header {
@@ -1798,23 +1835,6 @@ body {
   color: var(--color-text-faint);
   background-color: var(--color-hover-surface);
   border-radius: 999px;
-}
-
-.tasks-board-column-unlisted {
-  flex-shrink: 0;
-  padding: 0 0.35rem;
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--color-text-faint);
-  border: 1px dashed var(--color-border);
-  border-radius: 999px;
-  cursor: help;
-}
-
-.tasks-board-column-unlisted-col .tasks-board-column-title {
-  font-style: italic;
 }
 
 .tasks-board-column-add-btn {
@@ -1918,6 +1938,53 @@ body {
   margin-left: auto;
 }
 
+/* Backlog-column cards whose raw status isn't the configured backlog
+   status (v0.2.1 - replaces the old "unlisted column" concept: those
+   tasks now live in the Backlog column alongside the rest, with this
+   small badge instead of a whole separate column). */
+.tasks-card-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--color-text-faint);
+  border: 1px dashed var(--color-border);
+  border-radius: 999px;
+}
+
+/* Green "Complete" button on a Kanban card (v0.2.1) - must sit visually
+   apart from the card's own click/drag handling (js/tasks.js stops the
+   event before it reaches those). */
+.tasks-card-complete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  align-self: flex-start;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--color-success);
+  border: 1px solid var(--color-success);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tasks-card-complete-btn:hover {
+  background-color: #047857;
+  border-color: #047857;
+}
+
+[data-theme="dark"] .tasks-card-complete-btn {
+  color: #052e21;
+}
+
+[data-theme="dark"] .tasks-card-complete-btn:hover {
+  background-color: #10b981;
+  border-color: #10b981;
+}
+
 .tasks-card-drop-indicator {
   height: 3px;
   margin: -1px 0.1rem;
@@ -1986,7 +2053,7 @@ body {
   background-color: var(--color-hover-surface);
 }
 
-.tasks-list-row-archived {
+.tasks-list-row-completed {
   opacity: 0.55;
 }
 
@@ -2193,6 +2260,26 @@ body {
 
 .task-modal-field-wide {
   flex-basis: 100%;
+}
+
+/* Read-only "Folder" row shown only in create mode (v0.2.1) - looks like a
+   disabled `.mini-modal-input` rather than plain text, so it reads as "a
+   field you can't edit" rather than a label. */
+.task-modal-readonly-value {
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.875rem;
+  font-family: monospace;
+  color: var(--color-text-muted);
+  background-color: var(--color-hover-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.375rem;
+}
+
+/* New Note's locked folder chip sits directly above the name input in the
+   shared prompt modal - keep a small gap so the two boxes don't touch. */
+#rename-modal-locked-prefix {
+  margin-bottom: 0.4rem;
 }
 
 .task-modal-textarea {

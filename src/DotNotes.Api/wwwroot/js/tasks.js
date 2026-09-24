@@ -33,7 +33,7 @@ const Tasks = (() => {
   const listLabelFilterEl = document.getElementById('tasks-list-label-filter');
   const listAssigneeFilterEl = document.getElementById('tasks-list-assignee-filter');
   const listPriorityFilterEl = document.getElementById('tasks-list-priority-filter');
-  const listShowArchivedEl = document.getElementById('tasks-list-show-archived');
+  const listShowCompletedEl = document.getElementById('tasks-list-show-completed');
   const listNewBtn = document.getElementById('tasks-list-new-btn');
   const listTableEl = document.getElementById('tasks-list-table');
 
@@ -57,15 +57,24 @@ const Tasks = (() => {
   const modalSummaryEl = document.getElementById('task-modal-summary');
   const modalMetaEl = document.getElementById('task-modal-meta');
   const modalOpenNoteLinkEl = document.getElementById('task-modal-open-note-link');
-  const modalArchiveBtn = document.getElementById('task-modal-archive-btn');
+  const modalFolderRowEl = document.getElementById('task-modal-folder-row');
+  const modalFolderValueEl = document.getElementById('task-modal-folder-value');
+  const modalCompleteBtn = document.getElementById('task-modal-complete-btn');
   const modalCancelBtn = document.getElementById('task-modal-cancel-btn');
   const modalSaveBtn = document.getElementById('task-modal-save-btn');
   const modalCloseBtn = document.getElementById('task-modal-close-btn');
 
   // --- module state -----------------------------------------------------
 
-  let config = null; // { folder, idPrefix, statuses[], defaultStatus, priorities[] }
-  let allTasksCache = []; // includeArchived:true - sidebar counts, filter option lists, isTaskPath, rename lookup
+  // Case-sensitive - mirrors TaskFolders.IsInCompletedFolder on the backend
+  // (docs' v0.2.1 contract). js/app.js keeps its own copy for the sidebar
+  // tree's context menu, which has no reach into this module's closure.
+  const COMPLETED_FOLDER = 'Completed';
+
+  // { folder, idPrefix, statuses[], defaultStatus, backlogStatus,
+  //   completedStatus, completedFolder, priorities[] }
+  let config = null;
+  let allTasksCache = []; // includeCompleted:true - sidebar counts, filter option lists, isTaskPath, rename lookup
   let cachedPathSet = new Set();
   let currentView = null; // null | 'board' | 'list'
   let lastRevision = null;
@@ -300,16 +309,21 @@ const Tasks = (() => {
     navBoardBtn?.classList.toggle('tasks-nav-row-active', currentView === 'board');
   }
 
+  /** `task.completed`, defensively falling back to the old `archived` field name for a server that hasn't rolled forward yet. */
+  function isCompleted(task) {
+    return task.completed ?? task.archived ?? false;
+  }
+
   async function refreshTaskCache() {
     try {
-      const result = await Api.listTasks({ includeArchived: true });
+      const result = await Api.listTasks({ includeCompleted: true });
       allTasksCache = Array.isArray(result?.tasks) ? result.tasks : [];
     } catch (err) {
       console.error('Failed to load tasks for sidebar counts', err);
       return;
     }
     cachedPathSet = new Set(allTasksCache.map((t) => t.path));
-    const activeCount = allTasksCache.filter((t) => !t.archived).length;
+    const activeCount = allTasksCache.filter((t) => !isCompleted(t)).length;
     if (navAllCountEl) navAllCountEl.textContent = String(activeCount);
     if (navBoardCountEl) navBoardCountEl.textContent = String(activeCount);
   }
@@ -357,7 +371,7 @@ const Tasks = (() => {
     listViewEl?.classList.add('hidden');
     currentView = 'board';
     updateActiveNav();
-    Pomodoro.mount(pomodoroWidgetEl, () => allTasksCache.filter((t) => !t.archived).map((t) => ({ id: t.id, title: t.title })));
+    Pomodoro.mount(pomodoroWidgetEl, () => allTasksCache.filter((t) => !isCompleted(t)).map((t) => ({ id: t.id, title: t.title })));
     Pomodoro.render();
     await refreshTaskCache();
     populateFilterOptions();
@@ -435,7 +449,74 @@ const Tasks = (() => {
     return el;
   }
 
-  function buildCard(task) {
+  /**
+   * True for a board column whose tasks with an empty/unrecognised/backlog
+   * raw status all land in it (v0.2.1 - replaces the old "unlisted status"
+   * trailing-column concept: that column is now just the (always-present,
+   * leftmost) Backlog column). Falls back to comparing against
+   * `config.backlogStatus` for a server response that predates `isBacklog`.
+   */
+  function isBacklogColumn(column) {
+    return column.isBacklog ?? column.status === (config?.backlogStatus || 'Backlog');
+  }
+
+  /** Small "Blocked"/whatever-status badge for a Backlog-column card whose raw status isn't the Backlog status itself (v0.2.1). */
+  function buildCardStatusBadge(task) {
+    const backlogStatus = config?.backlogStatus || 'Backlog';
+    if (!task.status || task.status.toLowerCase() === backlogStatus.toLowerCase()) return null;
+    const el = document.createElement('span');
+    el.className = 'tasks-card-status-badge';
+    el.textContent = task.status;
+    return el;
+  }
+
+  /**
+   * Green "Complete" action on a card (v0.2.1). Must never start a drag or
+   * open the task modal - both the card's own `dragstart` and `click`
+   * listeners live on the card element and this button is a descendant of
+   * it, so every event that could trigger either is stopped here.
+   */
+  function buildCardCompleteButton(task, card) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tasks-card-complete-btn';
+    btn.title = 'Mark as done and move into a Completed subfolder';
+    btn.setAttribute('aria-label', `Complete ${task.id}`);
+    btn.draggable = false;
+    btn.textContent = 'Complete';
+    // A mousedown/pointerdown that starts on this button never fires a
+    // `dragstart` on the button itself (it's draggable=false), but the
+    // browser's native HTML5 DnD still picks the nearest draggable
+    // ancestor - this card - as the drag source, since drag-source
+    // selection happens outside JS event bubbling and isn't stopped by
+    // `stopPropagation()` here. So the card's own `dragstart` handler
+    // checks this flag and cancels the drag outright when it's set.
+    btn.addEventListener('mousedown', (event) => {
+      event.stopPropagation();
+      if (card) card.dataset.suppressDrag = 'true';
+    });
+    btn.addEventListener('mouseup', () => {
+      if (card) delete card.dataset.suppressDrag;
+    });
+    btn.addEventListener('dragstart', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    btn.addEventListener('keydown', (event) => {
+      // Stop the card's own keydown handler (Enter -> open modal) from also
+      // firing while this button has focus.
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.stopPropagation();
+      }
+    });
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      completeTaskWithConfirm(task);
+    });
+    return btn;
+  }
+
+  function buildCard(task, { isBacklog } = {}) {
     const card = document.createElement('div');
     card.className = 'tasks-card';
     card.draggable = true;
@@ -452,6 +533,10 @@ const Tasks = (() => {
     top.appendChild(idEl);
     const priorityBadge = buildPriorityBadge(task.priority);
     if (priorityBadge) top.appendChild(priorityBadge);
+    if (isBacklog) {
+      const statusBadge = buildCardStatusBadge(task);
+      if (statusBadge) top.appendChild(statusBadge);
+    }
     card.appendChild(top);
 
     const title = document.createElement('div');
@@ -498,6 +583,17 @@ const Tasks = (() => {
     meta.appendChild(date);
     card.appendChild(meta);
 
+    if (!isCompleted(task)) {
+      card.appendChild(buildCardCompleteButton(task, card));
+    }
+
+    // Any mousedown that reaches the card itself did NOT start on the
+    // Complete button (that button stops propagation of its own mousedown),
+    // so clear a suppress flag left stale by an earlier press-and-release
+    // on the button that ended outside it.
+    card.addEventListener('mousedown', () => {
+      delete card.dataset.suppressDrag;
+    });
     card.addEventListener('click', () => openModalById(task.id));
     card.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
@@ -506,6 +602,15 @@ const Tasks = (() => {
       }
     });
     card.addEventListener('dragstart', (event) => {
+      // A drag that started on the Complete button (see
+      // buildCardCompleteButton) must not drag the card - the browser still
+      // fires this event because the button is inside a draggable=true
+      // ancestor even though it's itself draggable=false.
+      if (card.dataset.suppressDrag) {
+        delete card.dataset.suppressDrag; // single-use: the mouseup that follows may land outside the button
+        event.preventDefault();
+        return;
+      }
       draggedTaskId = task.id;
       draggedFromStatus = card.closest('.tasks-board-column')?.dataset.status || null;
       event.dataTransfer.effectAllowed = 'move';
@@ -607,11 +712,11 @@ const Tasks = (() => {
     await refreshTaskCache();
   }
 
-  function wireColumnDropZone(cardsEl, status, unlisted) {
-    // Cards may be reordered inside an "unlisted" column, but nothing can be
-    // dropped INTO one from another column (the server rejects moving a task
-    // to a status that isn't in Tasks:Statuses).
-    const dropAllowed = () => !!draggedTaskId && !(unlisted && draggedFromStatus !== status);
+  function wireColumnDropZone(cardsEl, status) {
+    // Every column (Backlog included, v0.2.1) now accepts drops from any
+    // other column - there's no more "unlisted" column that only accepts
+    // its own cards back.
+    const dropAllowed = () => !!draggedTaskId;
     cardsEl.addEventListener('dragover', (event) => {
       if (!draggedTaskId) return;
       if (!dropAllowed()) {
@@ -650,21 +755,14 @@ const Tasks = (() => {
     return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, '\\$&');
   }
 
-  /** True for a board column whose status isn't in `Tasks:Statuses` (the server appends these after the configured ones; matching is case-insensitive like the server's). */
-  function isUnlistedStatus(status) {
-    const configured = config?.statuses || [];
-    if (!configured.length) return false;
-    return !configured.some((s) => String(s).toLowerCase() === String(status).toLowerCase());
-  }
-
   function renderBoardColumns(columns) {
     boardColumnsEl.innerHTML = '';
     for (const column of columns) {
+      const isBacklog = isBacklogColumn(column);
       const columnEl = document.createElement('div');
       columnEl.className = 'tasks-board-column';
       columnEl.dataset.status = column.status;
-      const unlisted = isUnlistedStatus(column.status);
-      if (unlisted) columnEl.classList.add('tasks-board-column-unlisted-col');
+      if (isBacklog) columnEl.classList.add('tasks-board-column-backlog');
 
       const header = document.createElement('div');
       header.className = 'tasks-board-column-header';
@@ -674,35 +772,23 @@ const Tasks = (() => {
       const countEl = document.createElement('span');
       countEl.className = 'tasks-board-column-count';
       countEl.textContent = String((column.tasks || []).length);
-      header.append(titleEl);
-      if (unlisted) {
-        // No "+" here: creating a task with a status that isn't configured
-        // is rejected server-side.
-        const unlistedEl = document.createElement('span');
-        unlistedEl.className = 'tasks-board-column-unlisted';
-        unlistedEl.textContent = 'unlisted';
-        unlistedEl.title = `"${column.status}" is not in Tasks:Statuses, so tasks can't be created or dropped here - only moved out or reordered.`;
-        header.append(unlistedEl);
-      }
-      header.append(countEl);
-      if (!unlisted) {
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'tasks-board-column-add-btn';
-        addBtn.title = `Add a task to ${column.status}`;
-        addBtn.textContent = '+';
-        addBtn.addEventListener('click', () => openModal(null, { presetStatus: column.status }));
-        header.append(addBtn);
-      }
+      header.append(titleEl, countEl);
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'tasks-board-column-add-btn';
+      addBtn.title = `Add a task to ${column.status}`;
+      addBtn.textContent = '+';
+      addBtn.addEventListener('click', () => openModal(null, { presetStatus: column.status }));
+      header.append(addBtn);
       columnEl.appendChild(header);
 
       const cardsEl = document.createElement('div');
       cardsEl.className = 'tasks-board-column-cards';
       cardsEl.dataset.status = column.status;
       for (const task of column.tasks || []) {
-        cardsEl.appendChild(buildCard(task));
+        cardsEl.appendChild(buildCard(task, { isBacklog }));
       }
-      wireColumnDropZone(cardsEl, column.status, unlisted);
+      wireColumnDropZone(cardsEl, column.status);
       columnEl.appendChild(cardsEl);
 
       boardColumnsEl.appendChild(columnEl);
@@ -718,7 +804,7 @@ const Tasks = (() => {
       label: listLabelFilterEl?.value || '',
       assignee: listAssigneeFilterEl?.value || '',
       priority: listPriorityFilterEl?.value || '',
-      includeArchived: !!listShowArchivedEl?.checked,
+      includeCompleted: !!listShowCompletedEl?.checked,
     };
   }
 
@@ -747,8 +833,8 @@ const Tasks = (() => {
     for (const task of sorted) {
       const row = document.createElement('tr');
       row.className = 'tasks-list-row';
-      if (task.archived) {
-        row.classList.add('tasks-list-row-archived');
+      if (isCompleted(task)) {
+        row.classList.add('tasks-list-row-completed');
       }
       row.addEventListener('click', () => openModalById(task.id));
 
@@ -910,6 +996,11 @@ const Tasks = (() => {
 
   let lastFocusedBeforeModal = null;
   let editingTask = null; // the full Task last loaded into the modal, or null in create mode
+  let editingFolder = null; // create-mode only: folder the new task will be created into (read-only row)
+  let modalStatusTouched = false; // true once the user changes #task-modal-status this session (v0.2.1)
+  modalStatusSelectEl?.addEventListener('change', () => {
+    modalStatusTouched = true;
+  });
 
   function populateModalSelects() {
     const statuses = (config?.statuses && config.statuses.length) ? config.statuses : ['To Do', 'In Progress', 'Done'];
@@ -921,8 +1012,12 @@ const Tasks = (() => {
       modalStatusSelectEl.appendChild(opt);
     }
     // An existing task with an unknown/legacy status (docs/06-DATA-MODEL.md's
-    // "unknown status" board-column rule) still needs to be selectable.
-    if (editingTask && !statuses.includes(editingTask.status)) {
+    // Backlog-column rule) still needs to be selectable - but an empty/null
+    // raw status is not a real status to offer as a choice (v0.2.1: leaving
+    // this blank-option out, combined with saveModal's raw-status
+    // preservation below, is what stops an unrelated field edit from
+    // silently rewriting an empty status to the default one).
+    if (editingTask && editingTask.status && !statuses.includes(editingTask.status)) {
       const opt = document.createElement('option');
       opt.value = editingTask.status;
       opt.textContent = editingTask.status;
@@ -941,8 +1036,16 @@ const Tasks = (() => {
 
   function openModal(task, options = {}) {
     editingTask = task || null;
+    // Create-mode only: the folder this task will be created into - shown
+    // as a read-only row (v0.2.1), never editable from this modal.
+    editingFolder = task ? null : (options.folder || config?.folder || 'Task');
     showError(modalErrorEl, null);
     populateModalSelects();
+
+    // v0.2.1: tracks whether the user has actually touched the status
+    // dropdown in this modal session - see the `change` listener below and
+    // currentModalPatch()'s raw-status preservation.
+    modalStatusTouched = false;
 
     modalTitleInputEl.value = task?.title || '';
     modalStatusSelectEl.value = task?.status || options.presetStatus || config?.defaultStatus || modalStatusSelectEl.options[0]?.value || '';
@@ -958,7 +1061,11 @@ const Tasks = (() => {
     modalNotesEl.value = task?.implementationNotes || '';
     modalSummaryEl.value = task?.finalSummary || '';
 
-    modalArchiveBtn.classList.toggle('hidden', !task || task.archived);
+    if (modalFolderRowEl) {
+      modalFolderRowEl.classList.toggle('hidden', !!task);
+      if (!task && modalFolderValueEl) modalFolderValueEl.textContent = editingFolder;
+    }
+    modalCompleteBtn.classList.toggle('hidden', !task || isCompleted(task));
     if (task?.path) {
       modalOpenNoteLinkEl.classList.remove('hidden');
       modalOpenNoteLinkEl.textContent = `Open note (${task.path})`;
@@ -988,6 +1095,7 @@ const Tasks = (() => {
   function closeModal() {
     modalOverlayEl.classList.add('hidden');
     editingTask = null;
+    editingFolder = null;
     if (lastFocusedBeforeModal && document.contains(lastFocusedBeforeModal)) {
       lastFocusedBeforeModal.focus();
     }
@@ -995,9 +1103,17 @@ const Tasks = (() => {
   }
 
   function currentModalPatch() {
+    // v0.2.1: an existing task with an empty or unrecognised raw status has
+    // no real matching entry in the dropdown (see populateModalSelects) - if
+    // the user never actually touched the status control, saving an
+    // unrelated field must not silently rewrite that status to whatever the
+    // select happened to default to (e.g. Backlog).
+    const statuses = (config?.statuses && config.statuses.length) ? config.statuses : [];
+    const preserveRawStatus =
+      editingTask && !modalStatusTouched && (!editingTask.status || !statuses.includes(editingTask.status));
     return {
       title: modalTitleInputEl.value.trim(),
-      status: modalStatusSelectEl.value,
+      status: preserveRawStatus ? editingTask.status : modalStatusSelectEl.value,
       priority: modalPrioritySelectEl.value,
       milestone: modalMilestoneEl.value,
       assignee: assigneeChipInput.getValue(),
@@ -1069,6 +1185,7 @@ const Tasks = (() => {
         await Api.createTask({
           title: patch.title,
           status: patch.status,
+          folder: editingFolder || undefined,
           description: patch.description,
           assignee: patch.assignee,
           labels: patch.labels,
@@ -1091,36 +1208,73 @@ const Tasks = (() => {
     }
   }
 
-  async function archiveEditingTask() {
-    if (!editingTask) return;
+  /**
+   * Shared "Complete task" flow (v0.2.1 - replaces the old red Archive
+   * action): confirm, `POST .../complete` (moves the note into a
+   * `Completed` subfolder next to it), then bring the board/list/tree/open
+   * editor up to date. Used by the modal's Complete button, a card's own
+   * Complete button, and the sidebar's "Complete task" context-menu item -
+   * one flow, three entry points, per this phase's task brief.
+   */
+  async function completeTaskWithConfirm(task, { onDone } = {}) {
     const confirmed = await window.Modal.confirm({
-      title: 'Archive task',
-      description: `Archive "${editingTask.id} - ${editingTask.title}"? It will be moved out of the board/list, but its dependency references are left as-is.`,
-      confirmLabel: 'Archive',
-      danger: true,
+      title: 'Complete task',
+      description: `Mark "${task.id} - ${task.title}" as done? It will be moved into a Completed subfolder next to it.`,
+      confirmLabel: 'Complete',
     });
     if (!confirmed) return;
-    if (!editingTask) return; // closed (e.g. by a poll-driven refresh) while the confirm was open
-    const { id, path: oldPath } = editingTask;
+    const { id, path: oldPath } = task;
     try {
       // The editor may have this note open: flush it before the file moves,
-      // then follow it to its archive path so the editor never sits on a
-      // dead path.
+      // then follow it to its new path so the editor never sits on a dead
+      // path.
       await onPrepareNoteChange?.(oldPath);
-      const archived = await Api.archiveTask(id);
-      closeModal();
+      const completed = await Api.completeTask(id);
+      onDone?.();
       await afterMutate();
       await onTreeReload?.();
-      await onFollowNoteChange?.(oldPath, archived?.path || oldPath);
+      await onFollowNoteChange?.(oldPath, completed?.path || oldPath);
     } catch (err) {
-      showError(modalErrorEl, err.message);
+      window.alert(`Could not complete "${id}": ${err.message}`);
     }
+  }
+
+  async function completeEditingTask() {
+    if (!editingTask) return;
+    const task = editingTask;
+    await completeTaskWithConfirm(task, {
+      onDone: () => {
+        // Only close the modal once the API call actually succeeded, and
+        // only if it's still open on the same task (a poll-driven refresh
+        // could have closed/replaced it while the confirm dialog was up).
+        if (editingTask === task) closeModal();
+      },
+    });
+  }
+
+  /**
+   * "Complete task" from the sidebar's task-file context menu
+   * (js/app.js) - looks the task up by note path (refreshing the cache
+   * first if it isn't there yet) and runs the same flow as the card/modal
+   * buttons.
+   */
+  async function completeTaskByPath(path) {
+    let task = allTasksCache.find((t) => t.path === path);
+    if (!task) {
+      await refreshTaskCache();
+      task = allTasksCache.find((t) => t.path === path);
+    }
+    if (!task) {
+      window.alert('This note is not a task.');
+      return;
+    }
+    await completeTaskWithConfirm(task);
   }
 
   modalSaveBtn?.addEventListener('click', saveModal);
   modalCancelBtn?.addEventListener('click', closeModal);
   modalCloseBtn?.addEventListener('click', closeModal);
-  modalArchiveBtn?.addEventListener('click', archiveEditingTask);
+  modalCompleteBtn?.addEventListener('click', completeEditingTask);
   modalOpenNoteLinkEl?.addEventListener('click', (event) => {
     event.preventDefault();
     if (editingTask?.path && onOpenNote) {
@@ -1136,7 +1290,7 @@ const Tasks = (() => {
   });
   document.addEventListener('keydown', (event) => {
     if (modalOverlayEl.classList.contains('hidden')) return;
-    // The shared confirm/prompt dialog (e.g. Archive's confirmation) sits on
+    // The shared confirm/prompt dialog (e.g. Complete's confirmation) sits on
     // top of this modal and owns Escape/Tab/Ctrl+S while it's open.
     if (window.Modal?.isOpen?.()) return;
     if (event.key === 'Tab') {
@@ -1194,7 +1348,7 @@ const Tasks = (() => {
   listLabelFilterEl?.addEventListener('change', loadList);
   listAssigneeFilterEl?.addEventListener('change', loadList);
   listPriorityFilterEl?.addEventListener('change', loadList);
-  listShowArchivedEl?.addEventListener('change', loadList);
+  listShowCompletedEl?.addEventListener('change', loadList);
   listNewBtn?.addEventListener('click', () => openModal(null, {}));
 
   navAllBtn?.addEventListener('click', showList);
@@ -1289,7 +1443,15 @@ const Tasks = (() => {
       config = await Api.getTaskConfig();
     } catch (err) {
       console.error('Failed to load /api/tasks/config', err);
-      config = { statuses: ['To Do', 'In Progress', 'Done'], priorities: ['high', 'medium', 'low'], defaultStatus: null };
+      config = {
+        folder: 'Task',
+        statuses: ['Backlog', 'To Do', 'In Progress', 'Done'],
+        priorities: ['high', 'medium', 'low'],
+        defaultStatus: null,
+        backlogStatus: 'Backlog',
+        completedStatus: 'Done',
+        completedFolder: COMPLETED_FOLDER,
+      };
     }
 
     await loadVersion();
@@ -1317,5 +1479,14 @@ const Tasks = (() => {
     hideTaskPreviewHeader,
     openTaskById: openModalById,
     isViewActive: () => currentView !== null,
+    // --- v0.2.1: the "+ New" menu's "New Task" and the folder context
+    // menu's "New Task" both open this same create-mode modal - see
+    // js/app.js's `openNewMenu`/`handleTreeContextMenu`.
+    openCreateTask: (options = {}) => openModal(null, options),
+    // The sidebar "+New" menu's default folder when nothing more specific
+    // applies (js/app.js has no reach into this module's `config`).
+    getDefaultFolder: () => config?.folder || 'Task',
+    // The sidebar task-file context menu's "Complete task" item.
+    completeTaskByPath,
   };
 })();

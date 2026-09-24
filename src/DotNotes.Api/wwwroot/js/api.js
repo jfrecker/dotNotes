@@ -49,8 +49,11 @@ const Api = (() => {
         params.set(key, value);
       }
     }
-    if (filters?.includeArchived) {
-      params.set('includeArchived', 'true');
+    // `includeCompleted` (v0.2.1, replaces `includeArchived` - see
+    // docs' v0.2.1 contract) - `includeArchived` is still accepted here as
+    // a deprecated alias so nothing breaks if a caller still passes it.
+    if (filters?.includeCompleted || filters?.includeArchived) {
+      params.set('includeCompleted', 'true');
     }
     const qs = params.toString();
     return qs ? `?${qs}` : '';
@@ -115,8 +118,10 @@ const Api = (() => {
         body: JSON.stringify(body),
       });
     },
-    archiveTask(id) {
-      return request(`/api/tasks/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+    // Marks the task done and moves its note into a `Completed` subfolder
+    // next to it (v0.2.1 - replaces the old "archive" action/endpoint).
+    completeTask(id) {
+      return request(`/api/tasks/${encodeURIComponent(id)}/complete`, { method: 'POST' });
     },
     convertNoteToTask(path, status) {
       const body = { path };

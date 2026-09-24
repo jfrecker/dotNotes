@@ -40,8 +40,8 @@ async function dragCard(page, cardLocator, targetLocator, yFraction) {
 }
 
 test.describe('Tasks review regressions', () => {
-  test('Archive: the confirm dialog is visible above the task modal, Escape closes only the confirm, and Archive archives', async ({ page, request, baseURL }) => {
-    const created = await createTask(request, baseURL, { title: uniqueName('archive-confirm') });
+  test('Complete: the confirm dialog is visible above the task modal, Escape closes only the confirm, and Complete completes', async ({ page, request, baseURL }) => {
+    const created = await createTask(request, baseURL, { title: uniqueName('complete-confirm') });
     try {
       await page.goto('/');
       await page.locator('#tasks-nav-board-btn').click();
@@ -49,7 +49,7 @@ test.describe('Tasks review regressions', () => {
       const taskModal = page.locator('#task-modal');
       await expect(taskModal).toBeVisible();
 
-      await page.locator('#task-modal-archive-btn').click();
+      await page.locator('#task-modal-complete-btn').click();
       const confirm = page.locator('#rename-modal');
       await expect(confirm).toBeVisible();
 
@@ -67,14 +67,14 @@ test.describe('Tasks review regressions', () => {
       await expect(confirm).toBeHidden();
       await expect(taskModal).toBeVisible();
 
-      await page.locator('#task-modal-archive-btn').click();
+      await page.locator('#task-modal-complete-btn').click();
       await expect(confirm).toBeVisible();
       await confirmBtn.click();
       await expect(taskModal).toBeHidden();
       await expect(page.locator(`.tasks-card[data-task-id="${created.id}"]`)).toHaveCount(0);
 
-      const archived = await getTask(request, baseURL, created.id);
-      expect(archived.archived).toBe(true);
+      const completed = await getTask(request, baseURL, created.id);
+      expect(completed.completed).toBe(true);
     } finally {
       const latest = await getTask(request, baseURL, created.id).catch(() => null);
       await deleteNote(request, baseURL, latest?.path || created.path);
@@ -327,36 +327,28 @@ test.describe('Tasks review regressions', () => {
     await second.close();
   });
 
-  test('a status that is not in Tasks:Statuses gets a labelled column with no "+", no drops in, and the modal keeps the status', async ({ page, request, baseURL }) => {
+  test('a status that is not in Tasks:Statuses lands in Backlog with a raw-status badge, and the modal keeps the status', async ({ page, request, baseURL }) => {
     const stem = uniqueName('unlisted');
     const id = `UNL-${Math.floor(Math.random() * 90000) + 10000}`;
     const notePath = `${id} - ${stem}.md`;
-    const listed = await createTask(request, baseURL, { title: uniqueName('unlisted-drop') });
-    const content = `---\nid: ${id}\ntitle: ${stem}\nstatus: Blocked-${stem.slice(-5)}\nordinal: 1000\n---\n\n## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nhello\n<!-- SECTION:DESCRIPTION:END -->\n`;
     const status = `Blocked-${stem.slice(-5)}`;
+    const content = `---\nid: ${id}\ntitle: ${stem}\nstatus: ${status}\nordinal: 1000\n---\n\n## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nhello\n<!-- SECTION:DESCRIPTION:END -->\n`;
     const put = await request.put(`${baseURL}/api/notes/${enc(notePath)}`, { data: { content } });
     expect(put.ok()).toBeTruthy();
     try {
       await page.goto('/');
       await page.locator('#tasks-nav-board-btn').click();
-      const column = page.locator('.tasks-board-column', { has: page.locator(`.tasks-board-column-cards[data-status="${status}"]`) });
-      await expect(column).toBeVisible({ timeout: 8_000 });
-      await expect(column.locator('.tasks-board-column-unlisted')).toBeVisible();
-      await expect(column.locator('.tasks-board-column-unlisted')).toHaveAttribute('title', /Tasks:Statuses/);
-      await expect(column.locator('.tasks-board-column-add-btn')).toHaveCount(0);
-      // Listed columns still have theirs.
-      await expect(page.locator('.tasks-board-column-add-btn').first()).toBeVisible();
-
-      // Dropping a card from a listed column INTO the unlisted one is refused.
-      const card = page.locator(`.tasks-card[data-task-id="${listed.id}"]`);
+      // No more per-status "unlisted" columns: it lands in the Backlog column.
+      const backlogColumn = page.locator('.tasks-board-column-backlog');
+      await expect(backlogColumn).toBeVisible({ timeout: 8_000 });
+      const card = backlogColumn.locator(`.tasks-card[data-task-id="${id}"]`);
       await expect(card).toBeVisible();
-      await dragCard(page, card, column.locator('.tasks-board-column-cards'), 0.5);
-      await page.waitForTimeout(800);
-      expect((await getTask(request, baseURL, listed.id)).status).toBe(listed.status);
-      await expect(column.locator(`.tasks-card[data-task-id="${listed.id}"]`)).toHaveCount(0);
+      await expect(card.locator('.tasks-card-status-badge')).toHaveText(status);
+      // Backlog is a normal column: it still has its own "+".
+      await expect(backlogColumn.locator('.tasks-board-column-add-btn')).toBeVisible();
 
-      // The modal for the unlisted task offers its current status and saving keeps it.
-      await column.locator(`.tasks-card[data-task-id="${id}"]`).click();
+      // The modal for this task offers its current (unlisted) raw status and saving keeps it.
+      await card.click();
       await expect(page.locator('#task-modal')).toBeVisible();
       await expect(page.locator('#task-modal-status')).toHaveValue(status);
       await page.locator('#task-modal-milestone').fill('m1');
@@ -368,7 +360,6 @@ test.describe('Tasks review regressions', () => {
     } finally {
       const latest = await getTask(request, baseURL, id).catch(() => null);
       await deleteNote(request, baseURL, latest?.path || notePath);
-      await deleteNote(request, baseURL, listed.path);
     }
   });
 });

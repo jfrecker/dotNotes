@@ -84,8 +84,10 @@ public static partial class TaskMarkdown
     /// <summary>
     /// <see langword="true"/> if <paramref name="content"/> is a task note:
     /// a leading frontmatter block (optionally after a BOM) that parses as
-    /// a YAML mapping with non-empty scalar <c>id</c> and <c>status</c>
-    /// keys, per docs/features/tasks-kanban/PLAN.md §2's "Detection" rule.
+    /// a YAML mapping with a non-empty scalar <c>id</c> key and a
+    /// <c>status</c> key present (its value may be empty/null - an empty
+    /// status is a legitimate Backlog task), per
+    /// docs/features/tasks-kanban/PLAN.md's v0.2.1 "Detection" update.
     /// </summary>
     public static bool IsTask(string content) => TryParse(content, out _);
 
@@ -150,6 +152,7 @@ public static partial class TaskMarkdown
         List<string> assignee = new(), labels = new(), dependencies = new();
         double? ordinal = null;
         var unknownFields = new List<TaskFrontmatterField>();
+        var hasStatusKey = false;
 
         var entries = root.Children.ToList();
         var segments = new FrontmatterSegments(frontmatterText, entries);
@@ -174,7 +177,7 @@ public static partial class TaskMarkdown
             switch (key)
             {
                 case "id": id = AsScalar(valueNode); break;
-                case "status": status = AsScalar(valueNode); break;
+                case "status": hasStatusKey = true; status = AsScalar(valueNode); break;
                 case "title": if (valueNode is YamlScalarNode) { title = AsScalar(valueNode); } else { KeepRaw(); } break;
                 case "reporter": if (valueNode is YamlScalarNode) { reporter = AsScalar(valueNode); } else { KeepRaw(); } break;
                 case "milestone": if (valueNode is YamlScalarNode) { milestone = AsScalar(valueNode); } else { KeepRaw(); } break;
@@ -197,7 +200,7 @@ public static partial class TaskMarkdown
             }
         }
 
-        if (requireTaskKeys && (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(status)))
+        if (requireTaskKeys && (string.IsNullOrWhiteSpace(id) || !hasStatusKey))
         {
             return false;
         }

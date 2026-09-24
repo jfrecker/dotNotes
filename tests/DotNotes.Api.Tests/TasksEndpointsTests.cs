@@ -46,11 +46,14 @@ public sealed class TasksEndpointsTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var config = await response.Content.ReadFromJsonAsync<TasksConfigDto>(ResponseJsonOptions);
         Assert.NotNull(config);
-        Assert.Equal("tasks", config!.Folder);
+        Assert.Equal("Task", config!.Folder);
         Assert.Equal("TASK", config.IdPrefix);
-        Assert.Equal(new[] { "To Do", "In Progress", "Done" }, config.Statuses);
-        Assert.Equal("To Do", config.DefaultStatus);
+        Assert.Equal(new[] { "Backlog", "To Do", "In Progress", "Done" }, config.Statuses);
+        Assert.Equal("Backlog", config.DefaultStatus);
         Assert.Equal(new[] { "high", "medium", "low" }, config.Priorities);
+        Assert.Equal("Backlog", config.BacklogStatus);
+        Assert.Equal("Done", config.CompletedStatus);
+        Assert.Equal("Completed", config.CompletedFolder);
     }
 
     [Fact]
@@ -65,16 +68,16 @@ public sealed class TasksEndpointsTests : IDisposable
         Assert.NotNull(task);
         Assert.Equal("TASK-1", task!.Id);
         Assert.Equal("Fix login redirect", task.Title);
-        Assert.Equal("To Do", task.Status);
-        Assert.Equal("tasks/TASK-1 - Fix login redirect.md", task.Path);
-        Assert.False(task.Archived);
+        Assert.Equal("Backlog", task.Status);
+        Assert.Equal("Task/TASK-1 - Fix login redirect.md", task.Path);
+        Assert.False(task.Completed);
         Assert.Equal(0, task.AcTotal);
 
-        var fullPath = Path.Combine(_vaultRootPath, "tasks", "TASK-1 - Fix login redirect.md");
+        var fullPath = Path.Combine(_vaultRootPath, "Task", "TASK-1 - Fix login redirect.md");
         Assert.True(File.Exists(fullPath));
         var content = await File.ReadAllTextAsync(fullPath);
         Assert.Contains("id: TASK-1", content);
-        Assert.Contains("status: To Do", content);
+        Assert.Contains("status: Backlog", content);
     }
 
     [Fact]
@@ -126,7 +129,7 @@ public sealed class TasksEndpointsTests : IDisposable
     public async Task PatchTask_TitleChange_RenamesFileAndRewritesWikilink()
     {
         var created = await CreateTaskAsync("Original Title");
-        await WriteNoteToDiskAsync("notes/reference.md", $"See [[tasks/{created.Id} - Original Title]] for context.");
+        await WriteNoteToDiskAsync("notes/reference.md", $"See [[Task/{created.Id} - Original Title]] for context.");
 
         var response = await _client.PatchAsJsonAsync($"/api/tasks/{created.Id}", new { title = "Renamed Title" });
 
@@ -134,15 +137,15 @@ public sealed class TasksEndpointsTests : IDisposable
         var updated = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
         Assert.NotNull(updated);
         Assert.Equal("Renamed Title", updated!.Title);
-        Assert.Equal($"tasks/{created.Id} - Renamed Title.md", updated.Path);
+        Assert.Equal($"Task/{created.Id} - Renamed Title.md", updated.Path);
 
-        var oldFullPath = Path.Combine(_vaultRootPath, "tasks", $"{created.Id} - Original Title.md");
-        var newFullPath = Path.Combine(_vaultRootPath, "tasks", $"{created.Id} - Renamed Title.md");
+        var oldFullPath = Path.Combine(_vaultRootPath, "Task", $"{created.Id} - Original Title.md");
+        var newFullPath = Path.Combine(_vaultRootPath, "Task", $"{created.Id} - Renamed Title.md");
         Assert.False(File.Exists(oldFullPath));
         Assert.True(File.Exists(newFullPath));
 
         var referenceContent = await File.ReadAllTextAsync(Path.Combine(_vaultRootPath, "notes", "reference.md"));
-        Assert.Contains($"[[tasks/{created.Id} - Renamed Title", referenceContent);
+        Assert.Contains($"[[Task/{created.Id} - Renamed Title", referenceContent);
     }
 
     [Fact]
@@ -188,9 +191,9 @@ public sealed class TasksEndpointsTests : IDisposable
     [Fact]
     public async Task MoveTask_WithinColumn_PersistsOrdinalOrderOnBoard()
     {
-        var first = await CreateTaskAsync("First");
-        var second = await CreateTaskAsync("Second");
-        var third = await CreateTaskAsync("Third");
+        var first = await CreateTaskAsync("First", status: "To Do");
+        var second = await CreateTaskAsync("Second", status: "To Do");
+        var third = await CreateTaskAsync("Third", status: "To Do");
 
         // Move "Third" to index 0 (top of the "To Do" column).
         var response = await _client.PostAsJsonAsync($"/api/tasks/{third.Id}/move", new { status = "To Do", index = 0 });
@@ -227,23 +230,124 @@ public sealed class TasksEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task ArchiveTask_MovesUnderArchiveFolderAndDisappearsFromBoardUnlessIncluded()
+    public async Task CompleteTask_MovesUnderCompletedFolderAndDisappearsFromBoardUnlessIncluded()
     {
-        var created = await CreateTaskAsync("Archive me");
+        var created = await CreateTaskAsync("Complete me");
+
+        var response = await _client.PostAsync($"/api/tasks/{created.Id}/complete", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var completed = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.True(completed!.Completed);
+        Assert.Equal("Task/Completed/TASK-1 - Complete me.md", completed.Path);
+        Assert.Equal("Done", completed.Status);
+
+        var boardWithoutCompleted = await GetBoardAsync();
+        Assert.All(boardWithoutCompleted.Columns, c => Assert.DoesNotContain(c.Tasks, t => t.Id == created.Id));
+
+        var listResponse = await _client.GetAsync("/api/tasks?includeCompleted=true");
+        var list = await listResponse.Content.ReadFromJsonAsync<TaskListDto>(ResponseJsonOptions);
+        Assert.Contains(list!.Tasks, t => t.Id == created.Id && t.Completed);
+    }
+
+    [Fact]
+    public async Task ArchiveAlias_StillCompletesTheTask()
+    {
+        var created = await CreateTaskAsync("Archive alias");
 
         var response = await _client.PostAsync($"/api/tasks/{created.Id}/archive", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var archived = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
-        Assert.True(archived!.Archived);
-        Assert.StartsWith("tasks/archive/", archived.Path);
+        var completed = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.True(completed!.Completed);
+        Assert.Equal("Task/Completed/TASK-1 - Archive alias.md", completed.Path);
+    }
 
-        var boardWithoutArchived = await GetBoardAsync();
-        Assert.All(boardWithoutArchived.Columns, c => Assert.DoesNotContain(c.Tasks, t => t.Id == created.Id));
+    [Fact]
+    public async Task CompleteTask_NameCollision_AppendsNumericSuffix()
+    {
+        var created = await CreateTaskAsync("Dup");
+        Directory.CreateDirectory(Path.Combine(_vaultRootPath, "Task", "Completed"));
+        await File.WriteAllTextAsync(
+            Path.Combine(_vaultRootPath, "Task", "Completed", $"{created.Id} - Dup.md"),
+            "# already there");
 
-        var listResponse = await _client.GetAsync("/api/tasks?includeArchived=true");
-        var list = await listResponse.Content.ReadFromJsonAsync<TaskListDto>(ResponseJsonOptions);
-        Assert.Contains(list!.Tasks, t => t.Id == created.Id && t.Archived);
+        var response = await _client.PostAsync($"/api/tasks/{created.Id}/complete", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var completed = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.Equal("Task/Completed/TASK-1 - Dup (2).md", completed!.Path);
+    }
+
+    [Fact]
+    public async Task CreateTask_WithFolder_CreatesThereAndShowsOnBoard()
+    {
+        var response = await _client.PostAsJsonAsync("/api/tasks", new { title = "Alpha task", folder = "Projects/Alpha" });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var task = await response.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.NotNull(task);
+        Assert.Equal("Projects/Alpha/TASK-1 - Alpha task.md", task!.Path);
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "Projects", "Alpha", "TASK-1 - Alpha task.md")));
+
+        var board = await GetBoardAsync();
+        Assert.Contains(board.Columns.SelectMany(c => c.Tasks), t => t.Id == task.Id);
+    }
+
+    [Fact]
+    public async Task Task_UnderLowercaseCompletedFolder_IsNotConsideredCompleted()
+    {
+        await WriteNoteToDiskAsync(
+            "Task/completed/TASK-42 - Lowercase.md",
+            "---\nid: TASK-42\ntitle: Lowercase\nstatus: Backlog\n---\n\nBody.\n");
+
+        var task = await GetTaskUntilAsync("TASK-42", t => t is not null);
+
+        Assert.NotNull(task);
+        Assert.False(task!.Completed);
+
+        var board = await GetBoardAsync();
+        Assert.Contains(board.Columns.SelectMany(c => c.Tasks), t => t.Id == "TASK-42");
+    }
+
+    [Fact]
+    public async Task Board_BacklogColumnIsFirstAndCollectsUnknownAndEmptyStatuses()
+    {
+        await WriteNoteToDiskAsync(
+            "Task/TASK-50 - No status.md",
+            "---\nid: TASK-50\ntitle: No status\nstatus:\n---\n\nBody.\n");
+        await WriteNoteToDiskAsync(
+            "Task/TASK-51 - Unknown status.md",
+            "---\nid: TASK-51\ntitle: Unknown status\nstatus: Blocked\n---\n\nBody.\n");
+        await GetTaskUntilAsync("TASK-51", t => t is not null);
+
+        var board = await GetBoardAsync();
+
+        Assert.Equal("Backlog", board.Columns[0].Status);
+        Assert.True(board.Columns[0].IsBacklog);
+        Assert.All(board.Columns.Skip(1), c => Assert.False(c.IsBacklog));
+        var backlogIds = board.Columns[0].Tasks.Select(t => t.Id).ToArray();
+        Assert.Contains("TASK-50", backlogIds);
+        Assert.Contains("TASK-51", backlogIds);
+    }
+
+    [Fact]
+    public async Task MoveTask_BacklogToToDoAndBackToBacklog_Persists()
+    {
+        var created = await CreateTaskAsync("Round trip");
+
+        var toToDo = await _client.PostAsJsonAsync($"/api/tasks/{created.Id}/move", new { status = "To Do" });
+        Assert.Equal(HttpStatusCode.OK, toToDo.StatusCode);
+        var afterToDo = await toToDo.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.Equal("To Do", afterToDo!.Status);
+
+        var backToBacklog = await _client.PostAsJsonAsync($"/api/tasks/{created.Id}/move", new { status = "Backlog" });
+        Assert.Equal(HttpStatusCode.OK, backToBacklog.StatusCode);
+        var afterBacklog = await backToBacklog.Content.ReadFromJsonAsync<TaskDto>(ResponseJsonOptions);
+        Assert.Equal("Backlog", afterBacklog!.Status);
+
+        var board = await GetBoardAsync();
+        Assert.Contains(board.Columns[0].Tasks, t => t.Id == created.Id);
     }
 
     [Fact]
@@ -316,7 +420,7 @@ public sealed class TasksEndpointsTests : IDisposable
         // (it must NOT show up as a task even after settling).
         await Task.Delay(300);
 
-        var response = await _client.GetAsync("/api/tasks?includeArchived=true");
+        var response = await _client.GetAsync("/api/tasks?includeCompleted=true");
         var list = await response.Content.ReadFromJsonAsync<TaskListDto>(ResponseJsonOptions);
         Assert.NotNull(list);
         Assert.DoesNotContain(list!.Tasks, t => t.Path == "plain/note.md");
@@ -439,7 +543,15 @@ public sealed class TasksEndpointsTests : IDisposable
         await File.WriteAllTextAsync(fullPath, content);
     }
 
-    private sealed record TasksConfigDto(string Folder, string IdPrefix, List<string> Statuses, string? DefaultStatus, List<string> Priorities);
+    private sealed record TasksConfigDto(
+        string Folder,
+        string IdPrefix,
+        List<string> Statuses,
+        string? DefaultStatus,
+        List<string> Priorities,
+        string BacklogStatus,
+        string CompletedStatus,
+        string CompletedFolder);
 
     private sealed record RevisionDto(long Revision);
 
@@ -447,7 +559,7 @@ public sealed class TasksEndpointsTests : IDisposable
 
     private sealed record TaskBoardDto(long Revision, List<TaskColumnDto> Columns);
 
-    private sealed record TaskColumnDto(string Status, List<TaskSummaryDto> Tasks);
+    private sealed record TaskColumnDto(string Status, List<TaskSummaryDto> Tasks, bool IsBacklog);
 
     private record TaskSummaryDto(
         string Id,
@@ -462,7 +574,7 @@ public sealed class TasksEndpointsTests : IDisposable
         DateTimeOffset? UpdatedDate,
         double? Ordinal,
         string Path,
-        bool Archived,
+        bool Completed,
         string Excerpt,
         int AcTotal,
         int AcChecked);
@@ -480,7 +592,7 @@ public sealed class TasksEndpointsTests : IDisposable
         DateTimeOffset? UpdatedDate,
         double? Ordinal,
         string Path,
-        bool Archived,
+        bool Completed,
         string Excerpt,
         int AcTotal,
         int AcChecked,

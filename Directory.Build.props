@@ -1,14 +1,15 @@
 <Project>
   <!--
     Single source of truth for the dotNotes release version (Phase 12,
-    Tasks & Kanban = v0.2.0). Reported by GET /api/config and the MCP
-    get_config tool via the assembly's InformationalVersion, shown in the
-    sidebar footer, and stamped on the Docker image as an OCI label.
+    Tasks & Kanban = v0.2.0; v0.2.1 follow-up fixes). Reported by
+    GET /api/config and the MCP get_config tool via the assembly's
+    InformationalVersion, shown in the sidebar footer, and stamped on the
+    Docker image as an OCI label.
     Bump the MINOR for features, PATCH for fixes.
   -->
   <PropertyGroup>
-    <Version>0.2.0</Version>
-    <!-- Keep InformationalVersion a clean "0.2.0" (no "+<git sha>" suffix). -->
+    <Version>0.2.1</Version>
+    <!-- Keep InformationalVersion a clean "0.2.1" (no "+<git sha>" suffix). -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>

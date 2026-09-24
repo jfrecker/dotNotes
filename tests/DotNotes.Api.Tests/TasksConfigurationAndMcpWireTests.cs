@@ -111,7 +111,7 @@ public sealed class TasksConfigurationAndMcpWireTests : IDisposable
 
         // Defaults for the lists are untouched when only other keys are configured.
         var config = await client.GetFromJsonAsync<JsonElement>("/api/tasks/config", ResponseJsonOptions);
-        Assert.Equal(3, config.GetProperty("statuses").GetArrayLength());
+        Assert.Equal(4, config.GetProperty("statuses").GetArrayLength());
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class TasksConfigurationAndMcpWireTests : IDisposable
         var taskTools = new[]
         {
             "list_tasks", "get_task", "create_task", "update_task", "move_task",
-            "archive_task", "get_board", "search_tasks", "get_task_workflow",
+            "complete_task", "archive_task", "get_board", "search_tasks", "get_task_workflow",
         };
         foreach (var name in taskTools)
         {
@@ -182,13 +182,42 @@ public sealed class TasksConfigurationAndMcpWireTests : IDisposable
         Assert.Equal(1, viaRest.GetProperty("acChecked").GetInt32());
         Assert.Equal("progress note", viaRest.GetProperty("implementationNotes").GetString());
 
-        var onDisk = await File.ReadAllTextAsync(Path.Combine(_vaultRootPath, "tasks", "TASK-1 - Made over MCP.md"));
+        var onDisk = await File.ReadAllTextAsync(Path.Combine(_vaultRootPath, "Task", "TASK-1 - Made over MCP.md"));
         Assert.Contains("status: In Progress", onDisk);
         Assert.Contains("- [x] #1 works", onDisk);
 
         // A bad status surfaces as a tool error, not a transport failure.
         var bad = await mcp.CallToolAsync("move_task", new Dictionary<string, object?> { ["id"] = "TASK-1", ["status"] = "Nowhere" });
         Assert.True(bad.IsError);
+    }
+
+    [Fact]
+    public async Task McpOverHttp_CompleteTaskAndArchiveAliasAndCreateWithFolder()
+    {
+        _factory = new NotesApiFactory(_vaultRootPath);
+        await using var mcp = await ConnectMcpAsync(_factory);
+        using var rest = _factory.CreateClient();
+
+        var created = await mcp.CallToolAsync("create_task", new Dictionary<string, object?>
+        {
+            ["title"] = "In a project folder",
+            ["folder"] = "Projects/Alpha",
+        });
+        Assert.NotEqual(true, created.IsError);
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "Projects", "Alpha", "TASK-1 - In a project folder.md")));
+
+        var completed = await mcp.CallToolAsync("complete_task", new Dictionary<string, object?> { ["id"] = "TASK-1" });
+        Assert.NotEqual(true, completed.IsError);
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "Projects", "Alpha", "Completed", "TASK-1 - In a project folder.md")));
+
+        var second = await mcp.CallToolAsync("create_task", new Dictionary<string, object?> { ["title"] = "Alias target" });
+        Assert.NotEqual(true, second.IsError);
+        var archived = await mcp.CallToolAsync("archive_task", new Dictionary<string, object?> { ["id"] = "TASK-2" });
+        Assert.NotEqual(true, archived.IsError);
+        Assert.True(File.Exists(Path.Combine(_vaultRootPath, "Task", "Completed", "TASK-2 - Alias target.md")));
+
+        var viaRest = await rest.GetFromJsonAsync<JsonElement>("/api/tasks/TASK-2", ResponseJsonOptions);
+        Assert.True(viaRest.GetProperty("completed").GetBoolean());
     }
 
     private static async Task<McpClient> ConnectMcpAsync(NotesApiFactory factory)

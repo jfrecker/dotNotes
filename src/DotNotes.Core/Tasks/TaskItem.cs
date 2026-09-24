@@ -30,11 +30,12 @@ public sealed record TaskItem
     public required DateTimeOffset UpdatedAt { get; init; }
 
     /// <summary>
-    /// <see langword="true"/> if <see cref="Path"/> is under the configured
-    /// tasks folder's <c>archive/</c> subfolder (case-insensitive, '/'
-    /// separators), per docs/features/tasks-kanban/PLAN.md §2.
+    /// <see langword="true"/> if any directory segment of <see cref="Path"/>
+    /// is exactly <see cref="TaskFolders.Completed"/> (ordinal,
+    /// case-sensitive - see <see cref="TaskFolders.IsInCompletedFolder"/>),
+    /// per docs/features/tasks-kanban/PLAN.md's v0.2.1 "Complete" update.
     /// </summary>
-    public bool Archived { get; init; }
+    public bool Completed { get; init; }
 
     public string Description { get; init; } = string.Empty;
     public IReadOnlyList<AcceptanceCriterion> AcceptanceCriteria { get; init; } = Array.Empty<AcceptanceCriterion>();

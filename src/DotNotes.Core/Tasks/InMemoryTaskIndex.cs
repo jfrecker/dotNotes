@@ -24,7 +24,6 @@ namespace DotNotes.Core.Tasks;
 public sealed class InMemoryTaskIndex : ITaskIndex
 {
     private readonly INoteRepository _noteRepository;
-    private readonly IOptions<TasksOptions> _options;
     private readonly string? _vaultRootPath;
     private readonly object _lock = new();
 
@@ -43,8 +42,14 @@ public sealed class InMemoryTaskIndex : ITaskIndex
         IOptions<TasksOptions> options,
         IOptions<VaultOptions>? vaultOptions = null)
     {
+        // `options` is accepted (and kept as a required constructor
+        // parameter, unchanged from before v0.2.1) purely for call-site/DI
+        // compatibility: TaskItem.Completed is now computed purely from the
+        // path (see TaskFolders.IsInCompletedFolder), independent of
+        // TasksOptions.Folder, so this type no longer needs the value
+        // itself.
+        _ = options;
         _noteRepository = noteRepository;
-        _options = options;
         _vaultRootPath = vaultOptions?.Value.RootPath;
     }
 
@@ -241,7 +246,7 @@ public sealed class InMemoryTaskIndex : ITaskIndex
             Ordinal = fm.Ordinal,
             Path = path,
             UpdatedAt = updatedAt,
-            Archived = IsArchived(path),
+            Completed = TaskFolders.IsInCompletedFolder(path),
             Description = TaskMarkdown.GetDescription(document.Body),
             AcceptanceCriteria = TaskMarkdown.GetAcceptanceCriteria(document.Body),
             ImplementationPlan = TaskMarkdown.GetImplementationPlan(document.Body),
@@ -269,19 +274,6 @@ public sealed class InMemoryTaskIndex : ITaskIndex
         }
 
         return DateTimeOffset.UtcNow;
-    }
-
-    private bool IsArchived(string path)
-    {
-        var folder = (_options.Value.Folder ?? string.Empty).Trim('/', '\\');
-        if (folder.Length == 0)
-        {
-            return false;
-        }
-
-        var archivePrefix = $"{folder}/archive/";
-        var normalizedPath = path.Replace('\\', '/');
-        return normalizedPath.StartsWith(archivePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DeriveTitleFromFileName(string path, string id)

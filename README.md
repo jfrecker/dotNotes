@@ -282,27 +282,45 @@ Users land on / instead of the page they asked for.
 <!-- AC:END -->
 ```
 
-- **Where they live:** new tasks go in the `tasks/` folder as
+- **Where they live:** new tasks go in the `Task/` folder as
   `TASK-12 - Fix login redirect.md`. Any note anywhere in the vault with
-  `id` and `status` in its frontmatter is recognised as a task.
+  an `id` and a `status` key in its frontmatter is recognised as a task
+  (the value of `status` may be empty). You can also create a task
+  directly inside any folder — right-click the folder or use the "+ New"
+  menu — and it's created there instead of the configured default.
+  Upgrading from v0.2.0: a startup migration automatically renames a
+  pre-existing lowercase `task`/`tasks` folder into `Task` (and its old
+  `archive` subfolder into `Completed`); nothing to do by hand unless you
+  set `Tasks__Folder=tasks` explicitly (old Podman Quadlet / `.env`) — see
+  [DEPLOYMENT.md](DEPLOYMENT.md#upgrading-from-v020-tasks-folder).
 - **Sidebar → TASKS:** *Kanban Board* and *All Tasks*, with a count of
   active tasks.
-- **Kanban Board:** one column per status. Drag cards between columns
-  or within a column; the order is saved in each file's `ordinal`.
-  Filter by text, label, assignee and priority. Click a card to edit
-  every field, including an interactive acceptance-criteria checklist
-  and the implementation plan and notes. *Open note* jumps to the raw
-  file.
-- **All Tasks:** a sortable, filterable table, with an option to show
-  archived tasks.
+- **Kanban Board:** *Backlog* is always the first column, followed by
+  one column per configured status. Tasks with an empty, unrecognised,
+  or Backlog status all land in Backlog. Drag cards between columns or
+  within a column; the order is saved in each file's `ordinal`. Filter
+  by text, label, assignee and priority. Click a card to edit every
+  field, including an interactive acceptance-criteria checklist and the
+  implementation plan and notes. *Open note* jumps to the raw file. The
+  green **Complete** button (on a card or in the task modal) completes
+  the task — see below.
+- **All Tasks:** a sortable, filterable table, with a "Show completed"
+  option.
 - **Convert to task:** right-click any note in the sidebar. The note
   gets task frontmatter and is renamed `TASK-N - <title>.md`, and links
   to it are rewritten. Existing notes are never converted automatically.
 - **Renaming** a task (task panel or the editor's title field) renames
   its file and rewrites incoming `[[wikilinks]]`. Editing `title:` by
   hand in the YAML changes only the displayed title.
-- **Archive** moves the file to `tasks/archive/`. Task IDs are never
-  reused.
+- **Complete** sets the task's status to the configured completed
+  status (`Done` by default) and moves its note into a `Completed`
+  subfolder next to it, e.g. `Task/ProjectX/My Task.md` becomes
+  `Task/ProjectX/Completed/My Task.md`. This is different from just
+  dragging a card to the Done column, which only changes its status and
+  leaves the file where it is — dragging to Done does *not* move the
+  file; only Complete does. Task IDs are never reused. (v0.2.0's
+  *Archive* is now *Complete*; the old REST/MCP names still work as
+  deprecated aliases.)
 - **Concurrent edits:** if a task (or any note) changes on disk while
   it is open in the editor, e.g. from the board or an AI assistant, the
   next autosave is refused and you choose *Reload latest* or keep your
@@ -311,18 +329,21 @@ Users land on / instead of the page they asked for.
 
   | Setting | Default | Env var |
   |---|---|---|
-  | `Folder` | `tasks` | `Tasks__Folder` |
+  | `Folder` | `Task` | `Tasks__Folder` |
   | `IdPrefix` | `TASK` | `Tasks__IdPrefix` |
-  | `Statuses` | `To Do`, `In Progress`, `Done` | `Tasks__Statuses__0`, `Tasks__Statuses__1`, … |
-  | `DefaultStatus` | first status | `Tasks__DefaultStatus` |
+  | `Statuses` | `Backlog`, `To Do`, `In Progress`, `Done` | `Tasks__Statuses__0`, `Tasks__Statuses__1`, … |
+  | `DefaultStatus` | Backlog status (first effective status) | `Tasks__DefaultStatus` |
+  | `BacklogStatus` | `Backlog` | `Tasks__BacklogStatus` |
+  | `CompletedStatus` | `Done` | `Tasks__CompletedStatus` |
   | `Priorities` | `high`, `medium`, `low` | `Tasks__Priorities__0`, … |
 
   `Statuses`/`Priorities` are deliberately absent from `appsettings.json`
   (their defaults live in code), so setting them via env vars or an
   override file defines the *whole* list, e.g.
-  `Tasks__Statuses__0=Backlog`, `Tasks__Statuses__1=Doing`,
+  `Tasks__Statuses__0=To Do`, `Tasks__Statuses__1=Doing`,
   `Tasks__Statuses__2=Review`, `Tasks__Statuses__3=Done`. The board's
-  columns follow that order.
+  columns follow that order, with `BacklogStatus` always prepended as
+  the first column even if you leave it out of the list.
 
 ### Pomodoro timer
 
@@ -361,7 +382,7 @@ not mapped at all. See `docs/05-MCP-SPEC.md` for the full tool contract.
 | Area | Tools |
 |---|---|
 | Notes | `search_notes`, `get_note`, `create_note`, `update_note`, `create_folder`, `move_note`, `move_folder`, `get_backlinks`, `get_recent_notes`, `get_config` |
-| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task` (fields, status, acceptance-criteria add/remove/check/uncheck, plan/notes set/append, final summary), `move_task` (status + position), `archive_task`, `get_board`, `search_tasks`, `get_task_workflow` |
+| Tasks | `list_tasks`, `get_task`, `create_task` (optional `folder`), `update_task` (fields, status, acceptance-criteria add/remove/check/uncheck, plan/notes set/append, final summary), `move_task` (status + position), `complete_task`, `archive_task` (deprecated alias for `complete_task`), `get_board`, `search_tasks`, `get_task_workflow` |
 
 The resource `dotnotes://workflow/tasks` (also available from the
 `get_task_workflow` tool) tells an agent how to work with tasks:
@@ -402,7 +423,7 @@ contradicts it (see `CLAUDE.md`).
 - Targets **.NET 10 (LTS)**.
 - Deliberately **descopes multi-language UI and multi-user accounts** —
   see `docs/03-FEATURE-SPEC.md`'s "Explicitly descoped" section.
-- Version **0.2.0** — defined once in `Directory.Build.props`.
+- Version **0.2.1** — defined once in `Directory.Build.props`.
 - The MCP server uses the official `ModelContextProtocol` C# SDK
   (currently pre-1.0, pinned at `2.2.0`) — `docs/05-MCP-SPEC.md` has the
   full tool contract.

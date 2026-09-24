@@ -136,7 +136,7 @@
 
           <!-- "TASKS" section (docs/features/tasks-kanban/PLAN.md §5) - two
                nav rows above "Folders & Notes", each with an active
-               (non-archived) task-count badge; js/tasks.js owns the counts
+               (non-completed) task-count badge; js/tasks.js owns the counts
                and which row is highlighted, this is just the static shell. -->
           <div class="sidebar-subheader flex items-center px-2">
             <span>Tasks</span>
@@ -503,9 +503,9 @@
                 <select id="tasks-list-priority-filter" class="tasks-filter-select" aria-label="Filter by priority">
                   <option value="">All priorities</option>
                 </select>
-                <label class="tasks-list-archived-toggle">
-                  <input id="tasks-list-show-archived" type="checkbox" />
-                  Show archived
+                <label class="tasks-list-completed-toggle">
+                  <input id="tasks-list-show-completed" type="checkbox" />
+                  Show completed
                 </label>
                 <button id="tasks-list-new-btn" type="button" class="new-menu-btn">+ New Task</button>
               </div>
@@ -593,6 +593,10 @@
       <p id="rename-modal-description" class="mini-modal-description"></p>
       <div id="rename-modal-field">
         <label id="rename-modal-label" for="rename-modal-input" class="mini-modal-label">New name</label>
+        <!-- Locked-prefix mode (v0.2.1 - Modal.prompt({ lockedPrefix })): shows the
+             folder a note/task is being created into as a non-editable chip, so
+             only the name itself is typed (see js/app.js's createNewNote). -->
+        <p id="rename-modal-locked-prefix" class="task-modal-readonly-value hidden"></p>
         <input id="rename-modal-input" type="text" class="mini-modal-input" autocomplete="off" />
       </div>
       <p id="rename-modal-error" class="mini-modal-error hidden"></p>
@@ -620,6 +624,12 @@
       </div>
       <p id="task-modal-error" class="mini-modal-error hidden"></p>
       <div class="task-modal-body">
+        <div id="task-modal-folder-row" class="task-modal-row hidden">
+          <div class="task-modal-field task-modal-field-wide">
+            <span class="mini-modal-label">Folder</span>
+            <p id="task-modal-folder-value" class="task-modal-readonly-value" title="The folder this task will be created into - not editable here."></p>
+          </div>
+        </div>
         <div class="task-modal-row">
           <label class="task-modal-field">
             <span class="mini-modal-label">Status</span>
@@ -680,7 +690,12 @@
       <div class="task-modal-footer">
         <a id="task-modal-open-note-link" href="#" class="task-modal-open-note-link">Open note</a>
         <div class="task-modal-footer-actions">
-          <button id="task-modal-archive-btn" type="button" class="mini-modal-btn mini-modal-btn-danger hidden">Archive</button>
+          <button
+            id="task-modal-complete-btn"
+            type="button"
+            class="mini-modal-btn mini-modal-btn-success hidden"
+            title="Mark as done and move into a Completed subfolder"
+          >Complete</button>
           <button id="task-modal-cancel-btn" type="button" class="mini-modal-btn">Cancel</button>
           <button id="task-modal-save-btn" type="button" class="mini-modal-btn mini-modal-btn-primary">Save</button>
         </div>

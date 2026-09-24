@@ -10,6 +10,7 @@ using DotNotes.Core.Sharing;
 using DotNotes.Core.Tasks;
 using DotNotes.Core.Vault;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Serilog;
 
@@ -205,6 +206,22 @@ builder.Services.AddHealthChecks();
 var app = builder.Build();
 
 app.Logger.LogInformation("Vault root resolved to {VaultRootPath}", vaultRootFullPath);
+
+// v0.2.1: one-time, idempotent migration of the legacy "tasks"/"task"
+// folder (and its old "archive" subfolder) to the new "Task"/"Completed"
+// convention (docs/features/tasks-kanban/PLAN.md's v0.2.1 update). Must run
+// before VaultWatcherService's initial scan (started below via
+// AddHostedService<VaultWatcherService>, which fires on host start) so the
+// watcher/indexes see the vault in its final, post-migration shape from the
+// very first scan. Never allowed to fail startup - TaskFolderMigration
+// itself catches and logs every error.
+await new TaskFolderMigration(
+    app.Services.GetRequiredService<IVaultReorganizationService>(),
+    app.Services.GetRequiredService<INoteRepository>(),
+    app.Services.GetRequiredService<IOptions<VaultOptions>>(),
+    app.Services.GetRequiredService<IOptions<TasksOptions>>(),
+    app.Services.GetRequiredService<ILogger<TaskFolderMigration>>())
+    .RunAsync();
 
 // Force every singleton whose constructor touches the vault root
 // (IShareTokenStore, IMediaStore) to be constructed right now, in the

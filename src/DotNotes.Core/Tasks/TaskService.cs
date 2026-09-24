@@ -51,44 +51,32 @@ public sealed class TaskService : ITaskService
     public TaskBoard GetBoard(TaskFilter filter)
     {
         var matches = List(filter);
-        var configuredStatuses = _options.Value.Statuses;
+        var effectiveStatuses = TaskStatuses.GetEffectiveStatuses(_options.Value);
 
-        var byStatus = new Dictionary<string, List<TaskItem>>(StringComparer.OrdinalIgnoreCase);
+        var byColumn = new Dictionary<string, List<TaskItem>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var status in effectiveStatuses)
+        {
+            byColumn[status] = new List<TaskItem>();
+        }
+
+        // `matches` is already ordered column-then-Comparer (see List), so
+        // appending in iteration order keeps each column's own list sorted.
         foreach (var task in matches)
         {
-            if (!byStatus.TryGetValue(task.Status, out var list))
-            {
-                list = new List<TaskItem>();
-                byStatus[task.Status] = list;
-            }
-
-            list.Add(task);
+            var column = TaskStatuses.ClassifyColumn(_options.Value, task.Status);
+            byColumn[column].Add(task);
         }
 
-        var columns = new List<TaskColumn>(configuredStatuses.Count + 1);
-        foreach (var status in configuredStatuses)
-        {
-            columns.Add(new TaskColumn(status, byStatus.TryGetValue(status, out var tasks) ? tasks : Array.Empty<TaskItem>()));
-        }
-
-        var seenExtra = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var task in matches)
-        {
-            if (configuredStatuses.Any(s => string.Equals(s, task.Status, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            if (seenExtra.Add(task.Status))
-            {
-                columns.Add(new TaskColumn(task.Status, byStatus[task.Status]));
-            }
-        }
+        var columns = effectiveStatuses
+            .Select(status => new TaskColumn(status, byColumn[status], TaskStatuses.IsBacklogColumnName(_options.Value, status)))
+            .ToArray();
 
         return new TaskBoard(columns, _taskIndex.Revision);
     }
 
-    public IReadOnlyList<TaskItem> Search(string query, int limit)
+    public IReadOnlyList<TaskItem> Search(string query, int limit) => Search(query, limit, includeCompleted: false);
+
+    public IReadOnlyList<TaskItem> Search(string query, int limit, bool includeCompleted)
     {
         if (string.IsNullOrWhiteSpace(query) || limit <= 0)
         {
@@ -96,7 +84,7 @@ public sealed class TaskService : ITaskService
         }
 
         return _taskIndex.GetAll()
-            .Where(t => !t.Archived)
+            .Where(t => includeCompleted || !t.Completed)
             .Select(t => (Task: t, Score: ComputeSearchScore(t, query)))
             .Where(x => x.Score > 0)
             .OrderByDescending(x => x.Score)
@@ -126,6 +114,12 @@ public sealed class TaskService : ITaskService
             var id = GenerateNextId(allTasks);
 
             var folder = NormalizeFolder(string.IsNullOrWhiteSpace(request.Folder) ? _options.Value.Folder : request.Folder);
+
+            if (TaskFolders.IsInCompletedFolder(folder))
+            {
+                throw new TaskValidationException($"Cannot create a task inside a '{TaskFolders.Completed}' folder ('{folder}').");
+            }
+
             var fileName = TaskFileNames.BuildFileName(id, title);
             var path = CombinePath(folder, fileName);
 
@@ -135,7 +129,8 @@ public sealed class TaskService : ITaskService
             }
 
             var now = DateTimeOffset.UtcNow;
-            var columnTasks = allTasks.Where(t => !t.Archived && string.Equals(t.Status, status, StringComparison.OrdinalIgnoreCase));
+            var columnTasks = allTasks.Where(t => !t.Completed &&
+                string.Equals(TaskStatuses.ClassifyColumn(_options.Value, t.Status), TaskStatuses.ClassifyColumn(_options.Value, status), StringComparison.OrdinalIgnoreCase));
             var ordinal = TaskOrdering.NextOrdinalForNewTask(columnTasks);
 
             var frontmatter = new TaskFrontmatterData
@@ -300,20 +295,34 @@ public sealed class TaskService : ITaskService
             var existing = _taskIndex.GetById(id) ?? throw new TaskNotFoundException(id);
             var allTasks = _taskIndex.GetAll();
 
-            // The task's own current status, and any status some task
-            // already holds, are valid targets even if not configured (the
-            // board shows such a status as an extra column, so reordering
-            // within it has to work). Brand-new unknown statuses are still
-            // rejected.
-            var canonicalStatus = CanonicalizeStatus(
-                NormalizeInline(status),
-                existing.Status,
-                allTasks.Where(t => !t.Archived).Select(t => t.Status));
+            // `targetStatus` is the raw frontmatter value that would be
+            // written if the moved task's status changes at all: one of the
+            // effective statuses, or the task's own current (possibly
+            // unrecognised, hand-written) raw status re-supplied as-is.
+            // `targetColumn` is the board column that value actually
+            // belongs to (TaskStatuses.ClassifyColumn) - these two are NOT
+            // the same thing for an unrecognised raw status (e.g. moving a
+            // task to its own current "Blocked" status): the column is
+            // Backlog (every empty/unrecognised/Backlog raw status lands
+            // there), even though the raw status written is "Blocked", not
+            // "Backlog". Using the raw status itself as if it were a column
+            // name here was the bug - it could never match any task's
+            // ClassifyColumn result, so the "destination column" below came
+            // up empty for every such move.
+            var targetStatus = CanonicalizeStatus(NormalizeInline(status), existing.Status);
+            var targetColumn = TaskStatuses.ClassifyColumn(_options.Value, targetStatus);
+            var currentColumn = TaskStatuses.ClassifyColumn(_options.Value, existing.Status);
+            var movingIntoBacklog = TaskStatuses.IsBacklogColumnName(_options.Value, targetColumn);
+            var currentlyInBacklog = TaskStatuses.IsBacklogColumnName(_options.Value, currentColumn);
 
+            // Column *membership* (TaskStatuses.ClassifyColumn), not raw
+            // status equality - the Backlog column mixes tasks holding many
+            // different raw statuses (empty, "Backlog", or anything
+            // unrecognised), and ordinal math must treat them as one column.
             var destinationColumn = allTasks
-                .Where(t => !t.Archived &&
+                .Where(t => !t.Completed &&
                             !string.Equals(t.Id, existing.Id, StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(t.Status, canonicalStatus, StringComparison.OrdinalIgnoreCase))
+                            string.Equals(TaskStatuses.ClassifyColumn(_options.Value, t.Status), targetColumn, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(t => t, TaskOrdering.Comparer)
                 .ToArray();
 
@@ -328,7 +337,7 @@ public sealed class TaskService : ITaskService
                 if (beforeIndex < 0)
                 {
                     throw new TaskValidationException(
-                        $"beforeId '{beforeTaskId}' is not another active task in the '{canonicalStatus}' column.");
+                        $"beforeId '{beforeTaskId}' is not another active task in the '{targetColumn}' column.");
                 }
 
                 index = beforeIndex;
@@ -337,7 +346,7 @@ public sealed class TaskService : ITaskService
             // No-op: already in this column at the requested position.
             // Skipping the write avoids bumping updated_date and racing an
             // open editor's expectedUpdatedAt for nothing.
-            if (!existing.Archived && string.Equals(existing.Status, canonicalStatus, StringComparison.OrdinalIgnoreCase))
+            if (!existing.Completed && string.Equals(currentColumn, targetColumn, StringComparison.OrdinalIgnoreCase))
             {
                 var currentIndex = destinationColumn.Count(t => TaskOrdering.Comparer.Compare(t, existing) < 0);
                 var requestedIndex = index is null or < 0 || index > destinationColumn.Length ? destinationColumn.Length : index.Value;
@@ -349,12 +358,20 @@ public sealed class TaskService : ITaskService
 
             var changedOrdinals = TaskOrdering.ComputeMove(destinationColumn, index, existing.Id);
 
+            // A reorder within the Backlog column (task already belongs
+            // there, still moving within it - including a move to its own
+            // unrecognised raw status) keeps the task's own raw status
+            // untouched - only its ordinal changes. Moving into Backlog
+            // from elsewhere, or into any other column, sets the status
+            // field to the target's raw status value.
+            var newStatusForMovedTask = movingIntoBacklog && currentlyInBacklog ? null : targetStatus;
+
             foreach (var (taskId, ordinal) in changedOrdinals)
             {
                 var isMovedTask = string.Equals(taskId, existing.Id, StringComparison.OrdinalIgnoreCase);
                 if (isMovedTask)
                 {
-                    var unchanged = string.Equals(existing.Status, canonicalStatus, StringComparison.Ordinal) &&
+                    var unchanged = (newStatusForMovedTask is null || string.Equals(existing.Status, newStatusForMovedTask, StringComparison.Ordinal)) &&
                                     existing.Ordinal is { } currentOrdinal && currentOrdinal == ordinal;
                     if (unchanged)
                     {
@@ -362,7 +379,7 @@ public sealed class TaskService : ITaskService
                     }
                 }
 
-                await ApplyOrdinalAndStatusAsync(taskId, ordinal, isMovedTask ? canonicalStatus : null, cancellationToken).ConfigureAwait(false);
+                await ApplyOrdinalAndStatusAsync(taskId, ordinal, isMovedTask ? newStatusForMovedTask : null, cancellationToken).ConfigureAwait(false);
             }
 
             return _taskIndex.GetById(existing.Id) ?? throw new TaskNotFoundException(id);
@@ -373,33 +390,76 @@ public sealed class TaskService : ITaskService
         }
     }
 
-    public async Task<TaskItem> ArchiveAsync(string id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Design note: the note is moved into its Completed subfolder
+    /// <i>first</i>, and the status/updated_date frontmatter is written to
+    /// it at its new path second. If the process crashes between those two
+    /// steps, the task ends up filed under Completed/ but still shows its
+    /// pre-completion status - a visibly-inconsistent but easily fixable
+    /// state (re-running CompleteAsync finishes the job, since a task
+    /// already in a Completed folder just gets its status re-applied). The
+    /// alternative order (write status first, then move) would instead risk
+    /// leaving a task showing status "Done" while still sitting in its
+    /// original column/folder if the crash happened between those two steps
+    /// - which is worse, since nothing about the board would suggest the
+    /// move never finished.
+    /// </summary>
+    public async Task<TaskItem> CompleteAsync(string id, CancellationToken cancellationToken = default)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var existing = _taskIndex.GetById(id) ?? throw new TaskNotFoundException(id);
-            if (existing.Archived)
+            var completedStatus = TaskStatuses.GetEffectiveCompletedStatus(_options.Value);
+
+            if (TaskFolders.IsInCompletedFolder(existing.Path))
             {
-                return existing;
+                // Idempotent: already filed under a Completed folder -
+                // never nest Completed/Completed. Just make sure the status
+                // reflects completion too.
+                if (string.Equals(existing.Status, completedStatus, StringComparison.Ordinal))
+                {
+                    return existing;
+                }
+
+                await ApplyOrdinalAndStatusAsync(existing.Id, null, completedStatus, cancellationToken).ConfigureAwait(false);
+                return _taskIndex.GetById(id) ?? throw new InvalidOperationException($"Task index did not pick up the completion of task '{id}'.");
             }
 
-            var folder = NormalizeFolder(_options.Value.Folder);
-            var archiveFolder = string.IsNullOrEmpty(folder) ? "archive" : $"{folder}/archive";
+            var directory = GetDirectory(existing.Path);
+            var completedFolder = string.IsNullOrEmpty(directory) ? TaskFolders.Completed : $"{directory}/{TaskFolders.Completed}";
             var fileName = System.IO.Path.GetFileName(existing.Path.Replace('\\', '/'));
-            var destination = CombinePath(archiveFolder, fileName);
+            var destination = await ResolveCollisionFreeDestinationAsync(completedFolder, fileName, cancellationToken).ConfigureAwait(false);
 
-            var moveResult = await _reorganizationService.MoveNoteAsync(existing.Path, destination, cancellationToken).ConfigureAwait(false);
+            await _reorganizationService.MoveNoteAsync(existing.Path, destination, cancellationToken).ConfigureAwait(false);
+            await ApplyOrdinalAndStatusAsync(existing.Id, null, completedStatus, cancellationToken).ConfigureAwait(false);
 
-            var finalNote = await _noteRepository.GetAsync(moveResult.Path, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidOperationException($"Task '{id}' vanished immediately after being archived to '{moveResult.Path}'.");
-            _taskIndex.NoteSaved(moveResult.Path, finalNote.Content, finalNote.UpdatedAt);
-
-            return _taskIndex.GetById(id) ?? throw new InvalidOperationException($"Task index did not pick up the archive of task '{id}'.");
+            return _taskIndex.GetById(id) ?? throw new InvalidOperationException($"Task index did not pick up the completion of task '{id}'.");
         }
         finally
         {
             _semaphore.Release();
+        }
+    }
+
+    /// <summary>Vault-relative <paramref name="folder"/>/<paramref name="fileName"/>, or, if that already exists, the same name with " (2)", " (3)", ... inserted before the extension until a free path is found. Never overwrites.</summary>
+    private async Task<string> ResolveCollisionFreeDestinationAsync(string folder, string fileName, CancellationToken cancellationToken)
+    {
+        var candidate = CombinePath(folder, fileName);
+        if (!await _noteRepository.ExistsAsync(candidate, cancellationToken).ConfigureAwait(false))
+        {
+            return candidate;
+        }
+
+        var stem = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        var extension = System.IO.Path.GetExtension(fileName);
+        for (var suffix = 2; ; suffix++)
+        {
+            var attemptPath = CombinePath(folder, $"{stem} ({suffix}){extension}");
+            if (!await _noteRepository.ExistsAsync(attemptPath, cancellationToken).ConfigureAwait(false))
+            {
+                return attemptPath;
+            }
         }
     }
 
@@ -430,7 +490,8 @@ public sealed class TaskService : ITaskService
             var title = TaskFileNames.Sanitize(NormalizeInline(string.IsNullOrWhiteSpace(existing?.Title) ? fileNameStem : existing.Title));
 
             var now = DateTimeOffset.UtcNow;
-            var columnTasks = allTasks.Where(t => !t.Archived && string.Equals(t.Status, canonicalStatus, StringComparison.OrdinalIgnoreCase));
+            var columnTasks = allTasks.Where(t => !t.Completed &&
+                string.Equals(TaskStatuses.ClassifyColumn(_options.Value, t.Status), TaskStatuses.ClassifyColumn(_options.Value, canonicalStatus), StringComparison.OrdinalIgnoreCase));
             var ordinal = TaskOrdering.NextOrdinalForNewTask(columnTasks);
 
             var frontmatter = new TaskFrontmatterData
@@ -611,7 +672,7 @@ public sealed class TaskService : ITaskService
 
     private bool Matches(TaskItem task, TaskFilter filter)
     {
-        if (!filter.IncludeArchived && task.Archived)
+        if (!filter.IncludeCompleted && task.Completed)
         {
             return false;
         }
@@ -651,10 +712,11 @@ public sealed class TaskService : ITaskService
 
     private int ConfiguredStatusIndex(TaskItem task)
     {
-        var statuses = _options.Value.Statuses;
-        for (var i = 0; i < statuses.Count; i++)
+        var effectiveStatuses = TaskStatuses.GetEffectiveStatuses(_options.Value);
+        var column = TaskStatuses.ClassifyColumn(_options.Value, task.Status);
+        for (var i = 0; i < effectiveStatuses.Count; i++)
         {
-            if (string.Equals(statuses[i], task.Status, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(effectiveStatuses[i], column, StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }
@@ -700,41 +762,44 @@ public sealed class TaskService : ITaskService
         return score;
     }
 
-    private string CanonicalizeStatus(string? requested, string? alsoAllowed = null, IEnumerable<string>? alsoAllowedAny = null)
+    /// <summary>
+    /// Resolves <paramref name="requested"/> to an effective status/column
+    /// name (see <see cref="TaskStatuses.GetEffectiveStatuses"/>), case
+    /// insensitively. An empty/whitespace request resolves to
+    /// <see cref="TasksOptions.DefaultStatus"/> if configured, else the
+    /// first effective status (Backlog). <paramref name="alsoAllowed"/> - a
+    /// task's own current raw status - is accepted as-is even when it isn't
+    /// an effective status, since re-supplying a hand-written/unrecognised
+    /// status unchanged must always be allowed. Anything else not among the
+    /// effective statuses throws <see cref="TaskValidationException"/>.
+    /// </summary>
+    private string CanonicalizeStatus(string? requested, string? alsoAllowed = null)
     {
-        var statuses = _options.Value.Statuses;
+        var effectiveStatuses = TaskStatuses.GetEffectiveStatuses(_options.Value);
 
         if (string.IsNullOrWhiteSpace(requested))
         {
             if (!string.IsNullOrWhiteSpace(_options.Value.DefaultStatus))
             {
-                return _options.Value.DefaultStatus!;
+                var matchedDefault = effectiveStatuses.FirstOrDefault(s => string.Equals(s, _options.Value.DefaultStatus, StringComparison.OrdinalIgnoreCase));
+                return matchedDefault ?? _options.Value.DefaultStatus!;
             }
 
-            return statuses.Count > 0 ? statuses[0] : "To Do";
+            return effectiveStatuses[0];
         }
 
-        var match = statuses.FirstOrDefault(s => string.Equals(s, requested, StringComparison.OrdinalIgnoreCase));
+        var match = effectiveStatuses.FirstOrDefault(s => string.Equals(s, requested, StringComparison.OrdinalIgnoreCase));
         if (match is not null)
         {
             return match;
         }
 
-        // Extra statuses that are valid only because a task already holds
-        // them (an unknown status hand-written into a file shows in its own
-        // board column, so operations on that column must keep working).
         if (alsoAllowed is not null && string.Equals(alsoAllowed, requested, StringComparison.OrdinalIgnoreCase))
         {
             return alsoAllowed;
         }
 
-        var held = alsoAllowedAny?.FirstOrDefault(h => string.Equals(h, requested, StringComparison.OrdinalIgnoreCase));
-        if (held is not null)
-        {
-            return held;
-        }
-
-        throw new TaskValidationException($"Status '{requested}' is not one of the configured statuses ({string.Join(", ", statuses)}).");
+        throw new TaskValidationException($"Status '{requested}' is not one of the configured statuses ({string.Join(", ", effectiveStatuses)}).");
     }
 
     private string? CanonicalizePriority(string? requested)

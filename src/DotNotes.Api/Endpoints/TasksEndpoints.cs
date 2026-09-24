@@ -34,7 +34,9 @@ public static class TasksEndpoints
         app.MapGet("/api/tasks/{id}", GetTaskAsync);
         app.MapPatch("/api/tasks/{id}", PatchTaskAsync);
         app.MapPost("/api/tasks/{id}/move", PostMoveAsync);
-        app.MapPost("/api/tasks/{id}/archive", PostArchiveAsync);
+        app.MapPost("/api/tasks/{id}/complete", PostCompleteAsync);
+        // Deprecated alias of /complete, kept for v0.2.0 clients.
+        app.MapPost("/api/tasks/{id}/archive", PostCompleteAsync);
 
         return app;
     }
@@ -42,32 +44,43 @@ public static class TasksEndpoints
     private static IResult GetTasksConfig(IOptions<TasksOptions> options)
     {
         var value = options.Value;
+        var effectiveStatuses = TaskStatuses.GetEffectiveStatuses(value);
         var defaultStatus = string.IsNullOrWhiteSpace(value.DefaultStatus)
-            ? value.Statuses.Count > 0 ? value.Statuses[0] : null
+            ? effectiveStatuses[0]
             : value.DefaultStatus;
 
-        return Results.Ok(new TasksConfigResponse(value.Folder, value.IdPrefix, value.Statuses, defaultStatus, value.Priorities));
+        return Results.Ok(new TasksConfigResponse(
+            value.Folder,
+            value.IdPrefix,
+            effectiveStatuses,
+            defaultStatus,
+            value.Priorities,
+            TaskStatuses.GetBacklogColumnName(value),
+            TaskStatuses.GetEffectiveCompletedStatus(value),
+            TaskFolders.Completed));
     }
 
     private static IResult GetRevision(ITaskIndex taskIndex) =>
         Results.Ok(new RevisionResponse(taskIndex.Revision));
 
     private static IResult GetTasks(
-        string? status, string? label, string? assignee, string? priority, string? milestone, string? q, bool? includeArchived,
+        string? status, string? label, string? assignee, string? priority, string? milestone, string? q,
+        bool? includeCompleted, bool? includeArchived,
         ITaskService taskService, ITaskIndex taskIndex)
     {
-        var filter = BuildFilter(status, label, assignee, priority, milestone, q, includeArchived);
+        var filter = BuildFilter(status, label, assignee, priority, milestone, q, includeCompleted, includeArchived);
         var tasks = taskService.List(filter).Select(MapSummary).ToArray();
         return Results.Ok(new TaskListResponse(taskIndex.Revision, tasks));
     }
 
     private static IResult GetBoard(
-        string? status, string? label, string? assignee, string? priority, string? milestone, string? q, bool? includeArchived,
+        string? status, string? label, string? assignee, string? priority, string? milestone, string? q,
+        bool? includeCompleted, bool? includeArchived,
         ITaskService taskService)
     {
-        var filter = BuildFilter(status, label, assignee, priority, milestone, q, includeArchived);
+        var filter = BuildFilter(status, label, assignee, priority, milestone, q, includeCompleted, includeArchived);
         var board = taskService.GetBoard(filter);
-        var columns = board.Columns.Select(c => new TaskColumnResponse(c.Status, c.Tasks.Select(MapSummary).ToArray())).ToArray();
+        var columns = board.Columns.Select(c => new TaskColumnResponse(c.Status, c.Tasks.Select(MapSummary).ToArray(), c.IsBacklog)).ToArray();
         return Results.Ok(new TaskBoardResponse(board.Revision, columns));
     }
 
@@ -243,16 +256,24 @@ public static class TasksEndpoints
         }
     }
 
-    private static async Task<IResult> PostArchiveAsync(string id, ITaskService taskService, CancellationToken cancellationToken)
+    private static async Task<IResult> PostCompleteAsync(string id, ITaskService taskService, CancellationToken cancellationToken)
     {
         try
         {
-            var archived = await taskService.ArchiveAsync(id, cancellationToken).ConfigureAwait(false);
-            return Results.Ok(MapTask(archived));
+            var completed = await taskService.CompleteAsync(id, cancellationToken).ConfigureAwait(false);
+            return Results.Ok(MapTask(completed));
         }
         catch (TaskNotFoundException ex)
         {
             return NotFound(ex.TaskId);
+        }
+        catch (TaskValidationException ex)
+        {
+            return BadRequest("invalid_request", ex.Message);
+        }
+        catch (InvalidNotePathException ex)
+        {
+            return InvalidPath(ex);
         }
         catch (DestinationAlreadyExistsException ex)
         {
@@ -313,7 +334,8 @@ public static class TasksEndpoints
     }
 
     private static TaskFilter BuildFilter(
-        string? status, string? label, string? assignee, string? priority, string? milestone, string? q, bool? includeArchived) =>
+        string? status, string? label, string? assignee, string? priority, string? milestone, string? q,
+        bool? includeCompleted, bool? includeArchived) =>
         new()
         {
             Status = status,
@@ -322,7 +344,7 @@ public static class TasksEndpoints
             Priority = priority,
             Milestone = milestone,
             Query = q,
-            IncludeArchived = includeArchived == true,
+            IncludeCompleted = includeCompleted == true || includeArchived == true,
         };
 
     private static TaskSummaryResponse MapSummary(TaskItem task) => new(
@@ -338,7 +360,7 @@ public static class TasksEndpoints
         task.UpdatedDate,
         task.Ordinal,
         task.Path,
-        task.Archived,
+        task.Completed,
         task.Excerpt,
         task.AcceptanceCriteria.Count,
         task.AcceptanceCriteria.Count(c => c.Checked));
@@ -356,7 +378,7 @@ public static class TasksEndpoints
         task.UpdatedDate,
         task.Ordinal,
         task.Path,
-        task.Archived,
+        task.Completed,
         task.Excerpt,
         task.AcceptanceCriteria.Count,
         task.AcceptanceCriteria.Count(c => c.Checked),
@@ -396,7 +418,15 @@ public static class TasksEndpoints
     private sealed record ErrorResponse(string Error, string? Detail = null);
 
     /// <summary>Backs <c>GET /api/tasks/config</c>.</summary>
-    private sealed record TasksConfigResponse(string Folder, string IdPrefix, IReadOnlyList<string> Statuses, string? DefaultStatus, IReadOnlyList<string> Priorities);
+    private sealed record TasksConfigResponse(
+        string Folder,
+        string IdPrefix,
+        IReadOnlyList<string> Statuses,
+        string? DefaultStatus,
+        IReadOnlyList<string> Priorities,
+        string BacklogStatus,
+        string CompletedStatus,
+        string CompletedFolder);
 
     /// <summary>Backs <c>GET /api/tasks/revision</c>.</summary>
     private sealed record RevisionResponse(long Revision);
@@ -408,7 +438,7 @@ public static class TasksEndpoints
     private sealed record TaskBoardResponse(long Revision, IReadOnlyList<TaskColumnResponse> Columns);
 
     /// <summary>One entry of <see cref="TaskBoardResponse"/>'s <c>columns</c> array.</summary>
-    private sealed record TaskColumnResponse(string Status, IReadOnlyList<TaskSummaryResponse> Tasks);
+    private sealed record TaskColumnResponse(string Status, IReadOnlyList<TaskSummaryResponse> Tasks, bool IsBacklog);
 
     /// <summary>
     /// The <c>TaskSummary</c> shape from docs/04-API-SPEC.md's Tasks
@@ -427,7 +457,7 @@ public static class TasksEndpoints
         DateTimeOffset? UpdatedDate,
         double? Ordinal,
         string Path,
-        bool Archived,
+        bool Completed,
         string Excerpt,
         int AcTotal,
         int AcChecked);
@@ -450,7 +480,7 @@ public static class TasksEndpoints
         DateTimeOffset? UpdatedDate,
         double? Ordinal,
         string Path,
-        bool Archived,
+        bool Completed,
         string Excerpt,
         int AcTotal,
         int AcChecked,
@@ -460,7 +490,7 @@ public static class TasksEndpoints
         string? ImplementationNotes,
         string? FinalSummary,
         DateTimeOffset UpdatedAt)
-        : TaskSummaryResponse(Id, Title, Status, Assignee, Labels, Priority, Milestone, Dependencies, CreatedDate, UpdatedDate, Ordinal, Path, Archived, Excerpt, AcTotal, AcChecked);
+        : TaskSummaryResponse(Id, Title, Status, Assignee, Labels, Priority, Milestone, Dependencies, CreatedDate, UpdatedDate, Ordinal, Path, Completed, Excerpt, AcTotal, AcChecked);
 
     /// <summary>One entry of <see cref="TaskResponse"/>'s <c>acceptanceCriteria</c> array.</summary>
     private sealed record AcceptanceCriterionResponse(int Index, string Text, bool Checked);

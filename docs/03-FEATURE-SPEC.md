@@ -49,21 +49,24 @@ after being exercised end to end (xUnit against a real temp vault, and/or
 the Playwright suite in `tests/e2e/specs/tasks-kanban.spec.js`); leftovers
 are in `docs/KNOWN-ISSUES.md`.
 
-- [x] A task is a plain `.md` note recognised by YAML frontmatter (`id` + `status`) anywhere in the vault; Backlog.md-compatible frontmatter and section markers, unknown keys preserved, byte-stable re-serialisation, CRLF/BOM tolerated; notes without task frontmatter behave exactly as before
+- [x] A task is a plain `.md` note recognised by YAML frontmatter (`id` + a `status` key, value may be empty) anywhere in the vault; Backlog.md-compatible frontmatter and section markers, unknown keys preserved, byte-stable re-serialisation, CRLF/BOM tolerated; notes without task frontmatter behave exactly as before
 - [x] Sidebar `TASKS` section above "Folders & Notes" with "All Tasks" and "Kanban Board" rows, each with the active-task count
-- [x] Kanban board: one column per configured status (`Tasks:Statuses`, env-overridable) with count badges; a task with an unconfigured status gets its own extra column
+- [x] Kanban board: a "Backlog" column is always first (`Tasks:BacklogStatus`, prepended even if omitted from config), followed by one column per remaining configured status (`Tasks:Statuses`, env-overridable) with count badges; tasks with an empty, unrecognised, or Backlog status all land in Backlog rather than spilling into extra trailing columns (v0.2.1)
 - [x] Cards show title, id, description excerpt, assignee, labels, priority, AC progress and created date; card click opens the task modal
-- [x] Drag-and-drop between columns and reordering within a column, persisted to the files (ordinal), including while a filter hides some cards
-- [x] "+ New Task" (board header, list view and per-column "+" with the column's status preset) with title validation
-- [x] Task modal: edit title, status, priority, assignee, labels, milestone, dependencies, description, plan/notes/final summary and an interactive acceptance-criteria checklist (add/edit/tick/remove); "Open note" link; Archive with confirmation
-- [x] Board filters (text, label, assignee, priority) and an All Tasks table that is sortable (numeric-aware ID sort) and filterable (text, status, label, assignee, priority, show archived)
+- [x] Drag-and-drop between columns and reordering within a column, persisted to the files (ordinal), including while a filter hides some cards; dragging into/out of Backlog only changes `status` (never moves the file)
+- [x] "+ New Task" (board header, list view and per-column "+" with the column's status preset); also available from the "+ New" sidebar/home menu and a folder's right-click menu, creating directly into that folder with it shown read-only (v0.2.1); title validation
+- [x] Task modal: edit title, status, priority, assignee, labels, milestone, dependencies, description, plan/notes/final summary and an interactive acceptance-criteria checklist (add/edit/tick/remove); "Open note" link; green Complete button with confirmation (v0.2.1, replaces Archive)
+- [x] Board filters (text, label, assignee, priority) and an All Tasks table that is sortable (numeric-aware ID sort) and filterable (text, status, label, assignee, priority, show completed)
 - [x] Live refresh: the board/list pick up API, MCP and direct-file edits without a reload (revision polling + file watcher)
 - [x] Pomodoro timer at the top right of the Kanban view: adjustable focus/short/long durations and cycles-before-long-break, start/pause/reset/skip, visible countdown + phase + cycle dots, chime and/or browser notification on phase change, settings persisted, keeps running across in-app navigation and reloads (top-nav indicator while the board is hidden), optional linked task
 - [x] Light and dark styling for the board, modal and Pomodoro widget
 - [x] "Convert to task" in the sidebar context menu (no auto-migration of existing notes); renaming a task's title from the modal, the API or the editor's inline title renames the file and rewrites incoming wikilinks; task note preview hides the YAML and shows a task header
+- [x] Task-file sidebar context menu offers "Complete task" for a task note not already in a `Completed` folder (v0.2.1)
 - [x] Concurrent-edit handling: the note editor sends `expectedUpdatedAt` and offers Reload latest / Overwrite on a 409; board edits are field-level patches that merge with whatever was saved elsewhere
-- [x] REST `/api/tasks*` (config, list, board, revision, get, create, patch, move, archive, convert) with 400/404/409/503 error cases
-- [x] MCP tools `list_tasks`, `get_task`, `create_task`, `update_task` (incl. AC check/uncheck/add/remove, plan/notes), `move_task`, `archive_task`, `get_board`, `search_tasks`, `get_task_workflow` plus the `dotnotes://workflow/tasks` resource, verified over the real `/mcp` HTTP transport; existing MCP tools unchanged
+- [x] Complete moves a task's note into a `Completed` subfolder next to it (e.g. `Task/ProjectX/Completed/`), created if missing, never overwriting, incoming wikilinks kept resolving (the reorganization service rewrites a link only when it would otherwise break); a note under any folder segment named exactly `Completed` is hidden from list/board/search unless explicitly included (v0.2.1, replaces the single vault-wide `<Folder>/archive/`)
+- [x] `Tasks:Folder` default renamed `tasks` → `Task`; an idempotent, crash-proof startup migration merges a pre-existing lowercase `task`/`tasks` folder into `Task`, and `<Tasks:Folder>/archive` into `<Tasks:Folder>/Completed` for whatever folder is configured, automatically (v0.2.1)
+- [x] REST `/api/tasks*` (config, list, board, revision, get, create, patch, move, complete, convert) with 400/404/409/503 error cases; `POST .../archive` and `includeArchived` kept as deprecated aliases
+- [x] MCP tools `list_tasks`, `get_task`, `create_task` (optional `folder`), `update_task` (incl. AC check/uncheck/add/remove, plan/notes), `move_task`, `complete_task`, `get_board`, `search_tasks`, `get_task_workflow` plus the `dotnotes://workflow/tasks` resource, verified over the real `/mcp` HTTP transport; `archive_task` kept as a deprecated alias; existing MCP tools unchanged
 - [ ] Subtasks, milestone entities, dependency cycle/readiness checks, multi-select move, Definition-of-Done/Comments editing (fields and sections are preserved on round-trip, just not editable) — deliberately later, see the plan
 
 ## Present in the UI but deliberately not implemented

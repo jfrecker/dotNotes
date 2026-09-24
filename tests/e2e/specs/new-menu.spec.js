@@ -9,7 +9,7 @@
 const { test, expect, uniqueName } = require('./fixtures');
 
 test.describe('"+New" dropdown', () => {
-  test('New Note / New Folder items exist and are enabled', async ({ page }) => {
+  test('New Note / New Folder / New Task items exist and are enabled', async ({ page }) => {
     await page.goto('/');
     await page.locator('#new-menu-btn').click();
 
@@ -17,6 +17,10 @@ test.describe('"+New" dropdown', () => {
     await expect(menu).toBeVisible();
     await expect(page.locator('#new-menu-note')).toBeEnabled();
     await expect(page.locator('#new-menu-folder')).toBeEnabled();
+    await expect(page.locator('#new-menu-task')).toBeEnabled();
+    // "New Task" sits right after "New Folder" (v0.2.1).
+    const ids = await page.locator('#new-menu [role="menuitem"]').evaluateAll((els) => els.map((e) => e.id));
+    expect(ids.slice(0, 3)).toEqual(['new-menu-note', 'new-menu-folder', 'new-menu-task']);
 
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);

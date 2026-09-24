@@ -41,31 +41,32 @@ endpoints use.
 
 | Tool | Arguments | Returns | Behaviour |
 |---|---|---|---|
-| `list_tasks` | `status?, label?, assignee?, priority?, milestone?, includeArchived?, limit?` | `TaskSummary[]` | Same sort as the board (status column order, then ordinal) |
+| `list_tasks` | `status?, label?, assignee?, priority?, milestone?, includeCompleted?, limit?` (`includeArchived?` still accepted as a deprecated alias) | `TaskSummary[]` | Same sort as the board (status column order, Backlog first, then ordinal) |
 | `get_task` | `id` | `Task` | Full task incl. description, acceptance criteria, plan, notes, final summary |
-| `create_task` | `title, description?, status?, priority?, assignee?[], labels?[], milestone?, dependencies?[], acceptanceCriteria?[]` | `Task` | Fails on an invalid status/priority (not in configuration) |
+| `create_task` | `title, description?, status?, priority?, assignee?[], labels?[], milestone?, dependencies?[], acceptanceCriteria?[], folder?` | `Task` | Fails on an invalid status/priority (not in configuration); blank `status` defaults to the Backlog column's status; `folder` defaults to `Tasks:Folder` and is rejected if it's inside an existing `Completed` folder |
 | `update_task` | `id` + optional `title, status, priority, assignee[], labels[], milestone, dependencies[], description, acceptanceCriteriaAdd[], acceptanceCriteriaRemove[] (1-based), acceptanceCriteriaCheck[], acceptanceCriteriaUncheck[], planSet, planAppend, notesSet, notesAppend, finalSummary` | `Task` | Patch semantics: only supplied fields change; `""` clears `priority`, `milestone`, `description`, `planSet`, `notesSet` or `finalSummary` (but **not** `title`, which can't be empty - that is an error); arrays replace the whole list |
-| `move_task` | `id, status, index?, beforeId?` | `Task` | `beforeId` (another task's id in the destination column) inserts the task immediately before it and wins over `index`, a 0-based position among the column's *other* tasks; omit both for the end. Moving to where the task already is writes nothing |
-| `archive_task` | `id` | `Task` | Moves the note under `<Tasks:Folder>/archive/` |
-| `get_board` | `status?, label?, assignee?, priority?, milestone?` | `{ columns: [{ status, tasks: TaskSummary[] }] }` | One column per configured status, in order, plus a trailing column per unknown status in use |
-| `search_tasks` | `query, limit?` | `TaskSummary[]` | Substring/token match over id, title, description, labels, assignee |
+| `move_task` | `id, status, index?, beforeId?` | `Task` | `beforeId` (another task's id in the destination column) inserts the task immediately before it and wins over `index`, a 0-based position among the column's *other* tasks; omit both for the end. Moving to where the task already is writes nothing. Moving to the Backlog column sets `status` to `Tasks:BacklogStatus` unless the task is already in Backlog (reorder-only) |
+| `complete_task` | `id` | `Task` | Sets status to `Tasks:CompletedStatus` and moves the note into a `Completed` subfolder next to it (e.g. `Task/ProjectX/Completed/`), created if missing, never overwriting. Idempotent if already completed |
+| `archive_task` | `id` | `Task` | **Deprecated** — calls the same behaviour as `complete_task`; use `complete_task` instead |
+| `get_board` | `status?, label?, assignee?, priority?, milestone?` | `{ columns: [{ status, isBacklog, tasks: TaskSummary[] }] }` | Backlog column always first, followed by one column per remaining configured status, in order — no more trailing unknown-status columns |
+| `search_tasks` | `query, limit?, includeCompleted?` (`includeArchived?` still accepted as a deprecated alias) | `TaskSummary[]` | Substring/token match over id, title, description, labels, assignee |
 | `get_task_workflow` | — | markdown string | Same content as the `dotnotes://workflow/tasks` resource below, for clients that don't read resources |
 
-`TaskSummary` = `{ id, title, status, assignee[], labels[], priority, milestone, dependencies[], createdDate, updatedDate, ordinal, path, archived, excerpt, acTotal, acChecked }`.
+`TaskSummary` = `{ id, title, status, assignee[], labels[], priority, milestone, dependencies[], createdDate, updatedDate, ordinal, path, completed, excerpt, acTotal, acChecked }` — `completed` (replaces v0.2.0's `archived`) is true when the task's path is under any folder segment named exactly `Completed` (case-sensitive).
 `Task` = `TaskSummary` + `{ description, acceptanceCriteria: [{ index, text, checked }], implementationPlan, implementationNotes, finalSummary, updatedAt }`.
 
 `create_task` fails if the request doesn't validate (empty title, or a
 `status`/`priority` outside this instance's configured lists) — the
 same `TaskValidationException` the REST endpoints translate to 400.
-`get_task`/`update_task`/`move_task`/`archive_task` fail with a
-structured MCP error if `id` doesn't match any task (same
+`get_task`/`update_task`/`move_task`/`complete_task`/`archive_task`
+fail with a structured MCP error if `id` doesn't match any task (same
 `TaskNotFoundException` the REST endpoints translate to 404).
 
 ## Resources
 
 | Resource | MIME type | Content |
 |---|---|---|
-| `dotnotes://workflow/tasks` | `text/markdown` | The same task-workflow guide as the `get_task_workflow` tool: when to create a task, how to write it as a self-contained work order, the plan → implement → notes → verify → final-summary execution flow, and when to archive vs. move to Done. Registered via `DotNotesTaskWorkflowResource` (`[McpServerResourceType]`/`[McpServerResource]`, added with `WithResources<T>()`) — see that section's implementation note on the installed SDK version. |
+| `dotnotes://workflow/tasks` | `text/markdown` | The same task-workflow guide as the `get_task_workflow` tool: when to create a task, how to write it as a self-contained work order, the plan → implement → notes → verify → final-summary execution flow, the Backlog column (new/not-started work), and when to `complete_task` a task (only Done/genuinely finished work — moves the note into a `Completed` subfolder) vs. just `move_task` it to Done (status only, file stays put). Registered via `DotNotesTaskWorkflowResource` (`[McpServerResourceType]`/`[McpServerResource]`, added with `WithResources<T>()`) — see that section's implementation note on the installed SDK version. |
 
 ## Transport
 

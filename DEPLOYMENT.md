@@ -305,10 +305,12 @@ directly for anything not covered by `.env.example`.
 | `Server:Port` | `Server__Port` | `5175` | — | **Informational only** — reserved for future features that need to know the app's own port (e.g. building absolute share URLs). It does **not** control which port Kestrel actually binds to; that's `ASPNETCORE_URLS` (below). Changing this alone will not move the app to a different port. |
 | `Sharing:Enabled` | `Sharing__Enabled` | `true` | `SHARING_ENABLED` | Enables/disables the public, token-protected share-link endpoints entirely (not mapped at all when `false`). |
 | `Mcp:Enabled` | `Mcp__Enabled` | `true` | `MCP_ENABLED` | Enables/disables the `/mcp` endpoint entirely (not mapped at all when `false`). |
-| `Tasks:Folder` | `Tasks__Folder` | `tasks` | `TASKS_FOLDER` | Vault-relative folder new tasks are created in; archived tasks go to `<Folder>/archive/`. Any note with `id` + `status` frontmatter anywhere in the vault is a task regardless. |
+| `Tasks:Folder` | `Tasks__Folder` | `Task` | `TASKS_FOLDER` | Vault-relative folder new tasks are created in; completing a task moves its note to a `Completed` subfolder next to it (e.g. `Task/ProjectX/Completed/`). Any note with `id` + a `status` key anywhere in the vault is a task regardless. A startup migration renames a pre-v0.2.1 root-level `task`/`tasks` folder (exact, lowercase names only) into `Task` when this is left at `Task`, and merges `<Tasks:Folder>/archive` into `<Tasks:Folder>/Completed` for whatever folder is configured — no manual step needed. See "Upgrading from v0.2.0" below if you set this explicitly. |
 | `Tasks:IdPrefix` | `Tasks__IdPrefix` | `TASK` | `TASKS_ID_PREFIX` | Prefix for generated task ids (`TASK-12`). |
-| `Tasks:Statuses` | `Tasks__Statuses__0`, `__1`, … | `To Do`, `In Progress`, `Done` | — (add to `docker-compose.yml`'s `environment:`) | Board columns in order. A configured list replaces the default as a whole. The first entry is the default status unless `Tasks:DefaultStatus` is set. |
-| `Tasks:DefaultStatus` | `Tasks__DefaultStatus` | first status | — | Status given to new tasks when none is specified. |
+| `Tasks:Statuses` | `Tasks__Statuses__0`, `__1`, … | `Backlog`, `To Do`, `In Progress`, `Done` | — (add to `docker-compose.yml`'s `environment:`) | Board columns in order. A configured list replaces the default as a whole; `Tasks:BacklogStatus` is always prepended as the first column even if you omit it. The first entry is the default status for new tasks unless `Tasks:DefaultStatus` is set. |
+| `Tasks:DefaultStatus` | `Tasks__DefaultStatus` | Backlog status (first effective status) | — | Status given to new tasks when none is specified. |
+| `Tasks:BacklogStatus` | `Tasks__BacklogStatus` | `Backlog` | — | Status used for the always-first Backlog column; tasks with an empty, unrecognised, or Backlog status land here. |
+| `Tasks:CompletedStatus` | `Tasks__CompletedStatus` | `Done` | — | Status set (in addition to moving the file) when a task is completed via `POST /api/tasks/{id}/complete` or the `complete_task` MCP tool. |
 | `Tasks:Priorities` | `Tasks__Priorities__0`, … | `high`, `medium`, `low` | — | Allowed priority values. |
 | `Serilog:MinimumLevel:Default` | `Serilog__MinimumLevel__Default` | `Information` (`Debug` in the `Development` environment) | — | Baseline log verbosity, written to both console and a rolling daily file under `logs/` (14-day retention). |
 | `Serilog:MinimumLevel:Override:Microsoft.AspNetCore` | `Serilog__MinimumLevel__Override__Microsoft.AspNetCore` | `Warning` (`Information` in `Development`) | — | Quiets ASP.NET Core's own framework-level request logging separately from the app's own log level. |
@@ -357,6 +359,33 @@ git pull
 dotnet publish src/DotNotes.Api -c Release -o /opt/dotnotes/publish
 sudo systemctl restart dotnotes   # or just re-run the executable if you're not using systemd
 ```
+
+### Upgrading from v0.2.0 (Tasks folder)
+
+v0.2.1 changes the default `Tasks:Folder` from `tasks` to `Task` and
+replaces the `<Folder>/archive` subfolder with `Completed` subfolders
+next to each completed task. On first start the app migrates your vault
+automatically (logged, never overwrites anything, and never blocks
+startup if it can't finish):
+
+- If you **never set** `Tasks__Folder` / `TASKS_FOLDER`, you need to do
+  nothing: your root-level `tasks` (or `task`) folder is renamed to
+  `Task`, and `Task/archive` is merged into `Task/Completed`.
+- If you **explicitly set** `Tasks__Folder=tasks` — the v0.2.0
+  `deploy/podman/dotnotes.container` Quadlet unit and a `.env` copied
+  from v0.2.0's `.env.example` (`TASKS_FOLDER=tasks`) both did this —
+  choose one:
+  - **Remove the override** (delete the `Environment=Tasks__Folder=tasks`
+    line, or the `TASKS_FOLDER=` line) to adopt `Task`; the folder is
+    then renamed for you on the next start.
+  - **Keep it.** Your `tasks` folder is left exactly where it is, and
+    `tasks/archive` is still merged into `tasks/Completed` so archived
+    tasks stay completed rather than reappearing on the board.
+- Only folders named exactly (case-sensitive) `task`/`tasks` and
+  `archive` are migrated; a folder such as `Tasks` or `Archive` is your
+  own and is never touched. See `docs/KNOWN-ISSUES.md` for the one
+  caveat (a new folder with one of those exact names is migrated again
+  on a later restart).
 
 ---
 
