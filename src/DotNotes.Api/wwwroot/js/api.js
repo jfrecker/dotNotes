@@ -169,8 +169,11 @@ const Api = (() => {
       });
     },
     // `mkdir -p` semantics, idempotent - no request body.
-    createFolder(path) {
-      return request(`/api/folders/${encodePath(path)}`, { method: 'POST' });
+    // `failIfExists`: 409 for an existing folder instead of mkdir -p's
+    // no-op success (the sidebar's "New Subfolder").
+    createFolder(path, { failIfExists = false } = {}) {
+      const query = failIfExists ? '?failIfExists=true' : '';
+      return request(`/api/folders/${encodePath(path)}${query}`, { method: 'POST' });
     },
     // Recursive: removes the folder and everything inside it. 404s if no
     // folder exists at `path` (docs/04-API-SPEC.md) - deliberately *not*

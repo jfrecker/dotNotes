@@ -2,6 +2,18 @@
 
 All notable changes to dotNotes are recorded here, most recent first.
 
+## Unreleased
+
+### Added — New Subfolder
+- **Folder right-click "New Subfolder":** creates a folder inside the
+  right-clicked one using the same locked-prefix prompt as "New Note",
+  then expands the parent and highlights the new folder. Empty, invalid,
+  `.`/`..` and duplicate names are rejected in the prompt.
+- **`failIfExists` on folder creation:** `POST /api/folders/{path}?failIfExists=true`
+  and the `create_folder` MCP tool's optional `failIfExists` argument report an
+  already-existing folder as a conflict (`409 already_exists` / tool error)
+  instead of `mkdir -p`'s no-op success. The default behaviour is unchanged.
+
 ## v0.2.1 — Backlog column, Complete replaces Archive, Task folder rename (2026-09-24)
 
 A follow-up pass on v0.2.0's Tasks & Kanban feature, addressing real-use

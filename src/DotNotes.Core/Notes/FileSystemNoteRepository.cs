@@ -166,7 +166,10 @@ public sealed class FileSystemNoteRepository : INoteRepository
         return Task.FromResult(true);
     }
 
-    public Task<string> CreateFolderAsync(string path, CancellationToken cancellationToken = default)
+    public Task<string> CreateFolderAsync(string path, CancellationToken cancellationToken = default) =>
+        CreateFolderAsync(path, failIfExists: false, cancellationToken);
+
+    public Task<string> CreateFolderAsync(string path, bool failIfExists, CancellationToken cancellationToken = default)
     {
         var resolved = ResolveFolderPath(path);
 
@@ -179,6 +182,16 @@ public sealed class FileSystemNoteRepository : INoteRepository
             throw new DestinationAlreadyExistsException(
                 resolved.NormalizedRelativePath,
                 $"A note already exists at '{resolved.NormalizedRelativePath}'; a file and a folder cannot share the same path.");
+        }
+
+        // Opt-in strict mode (the sidebar's "New Subfolder"): an existing
+        // folder is a conflict rather than mkdir -p's no-op success.
+        // Directory.Exists follows the host filesystem's case rules.
+        if (failIfExists && Directory.Exists(resolved.FullPath))
+        {
+            throw new DestinationAlreadyExistsException(
+                resolved.NormalizedRelativePath,
+                $"A folder already exists at '{resolved.NormalizedRelativePath}'.");
         }
 
         // Name rules apply only to segments this call would actually

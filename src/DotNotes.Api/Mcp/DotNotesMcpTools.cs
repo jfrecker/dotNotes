@@ -143,14 +143,15 @@ public sealed class DotNotesMcpTools(
     }
 
     [McpServerTool(Name = "create_folder")]
-    [Description("Create a folder at the given vault-relative path, creating any missing parent folders too (mkdir -p semantics). A no-op success if the folder already exists. Fails if a note (file) already exists at that exact path.")]
+    [Description("Create a folder at the given vault-relative path, creating any missing parent folders too (mkdir -p semantics). A no-op success if the folder already exists, unless failIfExists is true. Fails if a note (file) already exists at that exact path.")]
     public async Task<CreateFolderResultDto> CreateFolder(
         [Description("Vault-relative folder path, e.g. 'projects/archive'.")] string path,
+        [Description("When true, fail instead of succeeding if a folder already exists at path. Defaults to false.")] bool failIfExists = false,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var createdPath = await noteRepository.CreateFolderAsync(path, cancellationToken).ConfigureAwait(false);
+            var createdPath = await noteRepository.CreateFolderAsync(path, failIfExists, cancellationToken).ConfigureAwait(false);
             return new CreateFolderResultDto(createdPath);
         }
         catch (DestinationAlreadyExistsException ex)

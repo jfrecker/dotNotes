@@ -298,6 +298,31 @@ public sealed class DotNotesMcpToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateFolder_FailIfExists_ExistingFolder_ThrowsMcpException_DefaultStaysIdempotent()
+    {
+        var tools = CreateTools();
+        await tools.CreateFolder("projects/alpha");
+
+        var again = await tools.CreateFolder("projects/alpha");
+        Assert.Equal("projects/alpha", again.Path);
+
+        var ex = await Assert.ThrowsAsync<McpException>(() => tools.CreateFolder("projects/alpha", failIfExists: true));
+        Assert.Contains("projects/alpha", ex.Message);
+    }
+
+    [Fact]
+    public async Task CreateFolder_FailIfExists_NewSubfolder_IsCreated()
+    {
+        var tools = CreateTools();
+        await tools.CreateFolder("projects");
+
+        var result = await tools.CreateFolder("projects/beta", failIfExists: true);
+
+        Assert.Equal("projects/beta", result.Path);
+        Assert.True(Directory.Exists(Path.Combine(_vaultDirectory.FullName, "projects", "beta")));
+    }
+
+    [Fact]
     public async Task CreateFolder_NoteAlreadyExistsAtPath_ThrowsMcpException()
     {
         await _noteRepository.SaveAsync("projects/idea.md", "content");

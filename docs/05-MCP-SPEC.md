@@ -23,7 +23,7 @@ the original app's separate Python MCP process.
 | `get_backlinks` | `path: string` | list of `{ path, title }` | |
 | `get_recent_notes` | `limit?: int` | list of `{ path, title, updatedAt }` | Sorted by most recently modified |
 | `get_config` | — | `{ name, version, features, autosaveDelayMs }` | Lets the calling LLM discover capabilities before guessing |
-| `create_folder` | `path: string` | `{ path }` | `mkdir -p` semantics — idempotent if it already exists. Mirrors `POST /api/folders/{path}` |
+| `create_folder` | `path: string`, `failIfExists?: bool` | `{ path }` | `mkdir -p` semantics — idempotent if it already exists, unless `failIfExists` is true (then an existing folder is an error). Mirrors `POST /api/folders/{path}` (`?failIfExists=true`) |
 | `move_note` | `path: string`, `destinationPath: string` | `{ path, updatedAt, rewrittenNotes }` | Moves or renames a note (rename = move within the same folder). Fails if `destinationPath` already exists — never overwrites. Rewrites incoming `[[wikilinks]]` that would otherwise break; `rewrittenNotes` lists every note whose content changed. Mirrors `POST /api/notes/{path}/move` |
 | `move_folder` | `path: string`, `destinationPath: string` | `{ path, rewrittenNotes }` | Moves or renames a folder and everything inside it. Fails if `destinationPath` already exists, or is the folder itself or one of its descendants. Same wikilink rewriting as `move_note`, across every note in the moved subtree. Mirrors `POST /api/folders/{path}/move` |
 

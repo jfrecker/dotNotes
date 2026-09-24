@@ -123,6 +123,17 @@ public interface INoteRepository
     Task<string> CreateFolderAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Same as <see cref="CreateFolderAsync(string, CancellationToken)"/>,
+    /// except that when <paramref name="failIfExists"/> is <c>true</c> an
+    /// already-existing folder at <paramref name="path"/> throws
+    /// <see cref="DestinationAlreadyExistsException"/> instead of being a
+    /// no-op success. Backs <c>POST /api/folders/{**path}?failIfExists=true</c>
+    /// (the sidebar's "New Subfolder") and the <c>create_folder</c> MCP
+    /// tool's <c>failIfExists</c> argument.
+    /// </summary>
+    Task<string> CreateFolderAsync(string path, bool failIfExists, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes the folder at vault-relative <paramref name="path"/> and
     /// everything inside it (nested notes, media, and subfolders at any
     /// depth). Returns <see langword="false"/> (rather than throwing) if

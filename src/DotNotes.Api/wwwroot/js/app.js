@@ -778,6 +778,73 @@
     }
   }
 
+  /**
+   * "New Subfolder" from a folder's right-click menu: same locked-prefix
+   * prompt as createNewNoteInFolder, but for a single folder name. Uses
+   * `failIfExists` so an existing sibling is a 409 (surfaced like every
+   * other create error) rather than mkdir -p's silent no-op.
+   */
+  async function createNewSubfolder(parent) {
+    const name = await Modal.prompt({
+      title: 'New Subfolder',
+      description: 'Enter a name for the new folder.',
+      label: 'Name',
+      lockedPrefix: parent,
+      confirmLabel: 'Create',
+      validate: (raw) => {
+        const validated = validateEntryName(raw);
+        if (!validated.ok) {
+          return { ok: false, message: validated.message };
+        }
+        if (validated.name === '.' || validated.name === '..') {
+          return { ok: false, message: 'Name cannot be "." or "..".' };
+        }
+        if (folderChildNames(parent).includes(validated.name)) {
+          return { ok: false, message: `"${validated.name}" already exists in this folder.` };
+        }
+        return { ok: true, value: validated.name };
+      },
+    });
+    if (name === null) {
+      return; // user cancelled
+    }
+
+    const path = `${parent}/${name}`;
+    try {
+      const created = await Api.createFolder(path, { failIfExists: true });
+      Tree.expandFolder(parent);
+      await loadTree();
+      highlightTreeFolder(created?.path || path);
+    } catch (err) {
+      window.alert(`Could not create folder "${path}": ${err.message}`);
+    }
+  }
+
+  /** Names of the direct children (notes and folders) of `folderPath` in the last-loaded tree. */
+  function folderChildNames(folderPath) {
+    let list = lastTreeEntries || [];
+    for (const segment of folderPath.split('/')) {
+      const folder = list.find((e) => e.type === 'folder' && e.name === segment);
+      if (!folder) {
+        return [];
+      }
+      list = folder.children || [];
+    }
+    return list.map((e) => e.name);
+  }
+
+  /** Scrolls to, focuses and briefly highlights a folder row (e.g. one just created). */
+  function highlightTreeFolder(path) {
+    const row = [...fileTreeEl.querySelectorAll('[data-type="folder"]')].find((r) => r.dataset.path === path);
+    if (!row) {
+      return;
+    }
+    row.scrollIntoView({ block: 'nearest' });
+    row.focus();
+    row.classList.add('tree-row-just-created');
+    setTimeout(() => row.classList.remove('tree-row-just-created'), 2000);
+  }
+
   // --- rename/move a note or folder (drag-and-drop, right-click menu, or
   //     the Menu-key/Shift+F10 keyboard fallback - js/tree.js) -----------
   //
@@ -1233,6 +1300,9 @@
       if (!isInCompletedFolder(`${entry.path}/x`)) {
         items.push({ id: 'tree-context-new-task', label: 'New Task', icon: ICON_NEW_TASK, onSelect: () => Tasks.openCreateTask({ folder: entry.path }) });
       }
+      // Offered on every folder, like "New Note" (a subfolder is fine
+      // inside Task/ or a Completed folder).
+      items.push({ id: 'tree-context-new-subfolder', label: 'New Subfolder', icon: ICON_NEW_FOLDER, onSelect: () => createNewSubfolder(entry.path) });
     }
     items.push(
       { id: 'tree-context-rename', label: 'Rename', icon: ICON_RENAME, onSelect: () => openRenameModal(entry) },
