@@ -68,7 +68,8 @@ public static class FoldersEndpoints
         HttpRequest request,
         INoteRepository noteRepository,
         IVaultReorganizationService reorganizationService,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool? failIfExists = null)
     {
         if (path.EndsWith(MoveRouteSuffix, StringComparison.Ordinal))
         {
@@ -76,17 +77,24 @@ public static class FoldersEndpoints
             return MoveFolderAsync(sourcePath, request, reorganizationService, cancellationToken);
         }
 
-        return CreateFolderAsync(path, noteRepository, cancellationToken);
+        return CreateFolderAsync(path, failIfExists == true, noteRepository, cancellationToken);
     }
 
+    /// <remarks>
+    /// <paramref name="failIfExists"/> (<c>?failIfExists=true</c>) turns an
+    /// already-existing folder into <c>409 already_exists</c> instead of the
+    /// default <c>mkdir -p</c> no-op success - used by the sidebar's "New
+    /// Subfolder", which must not silently "create" a folder that's already there.
+    /// </remarks>
     private static async Task<IResult> CreateFolderAsync(
         string path,
+        bool failIfExists,
         INoteRepository noteRepository,
         CancellationToken cancellationToken)
     {
         try
         {
-            var createdPath = await noteRepository.CreateFolderAsync(path, cancellationToken).ConfigureAwait(false);
+            var createdPath = await noteRepository.CreateFolderAsync(path, failIfExists, cancellationToken).ConfigureAwait(false);
             return Results.Ok(new FolderResponse(createdPath));
         }
         catch (DestinationAlreadyExistsException ex)

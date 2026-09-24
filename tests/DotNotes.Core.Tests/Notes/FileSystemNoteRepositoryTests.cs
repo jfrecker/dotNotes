@@ -558,6 +558,43 @@ public sealed class FileSystemNoteRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateFolderAsync_FailIfExists_CreatesNestedSubfolderInsideExistingParent()
+    {
+        await _repository.CreateFolderAsync("projects");
+
+        var result = await _repository.CreateFolderAsync("projects/alpha", failIfExists: true);
+
+        Assert.Equal("projects/alpha", result);
+        Assert.True(Directory.Exists(Path.Combine(_vaultDirectory.FullName, "projects", "alpha")));
+    }
+
+    [Fact]
+    public async Task CreateFolderAsync_FailIfExists_Throws_WhenFolderAlreadyExists()
+    {
+        await _repository.CreateFolderAsync("projects/alpha");
+        await _repository.SaveAsync("projects/alpha/keep.md", "content");
+
+        var ex = await Assert.ThrowsAsync<DestinationAlreadyExistsException>(
+            () => _repository.CreateFolderAsync("projects/alpha", failIfExists: true));
+
+        Assert.Equal("projects/alpha", ex.Path);
+        Assert.True(File.Exists(Path.Combine(_vaultDirectory.FullName, "projects", "alpha", "keep.md")));
+    }
+
+    [Theory]
+    [InlineData("projects/../../escape")]
+    [InlineData("projects/..")]
+    [InlineData("projects/.")]
+    [InlineData("projects/bad|name")]
+    public async Task CreateFolderAsync_FailIfExists_Throws_ForTraversalAndInvalidNames(string path)
+    {
+        await _repository.CreateFolderAsync("projects");
+
+        await Assert.ThrowsAsync<InvalidNotePathException>(
+            () => _repository.CreateFolderAsync(path, failIfExists: true));
+    }
+
+    [Fact]
     public async Task CreateFolderAsync_Throws_WhenVaultRootHasVanished()
     {
         Directory.Delete(_vaultDirectory.FullName, recursive: true);

@@ -100,6 +100,60 @@ public sealed class FoldersEndpointsTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateFolder_FailIfExists_NestedSubfolder_Returns200AndCreatesDirectory()
+    {
+        await _client.PostAsync("/api/folders/projects", content: null);
+
+        var response = await _client.PostAsync("/api/folders/projects/alpha?failIfExists=true", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<FolderDto>(ResponseJsonOptions);
+        Assert.Equal("projects/alpha", result!.Path);
+        Assert.True(Directory.Exists(Path.Combine(_vaultRootPath, "projects", "alpha")));
+    }
+
+    [Fact]
+    public async Task CreateFolder_FailIfExists_ExistingFolder_Returns409AlreadyExists()
+    {
+        await _client.PostAsync("/api/folders/projects/alpha", content: null);
+
+        var response = await _client.PostAsync("/api/folders/projects/alpha?failIfExists=true", content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorDto>(ResponseJsonOptions);
+        Assert.Equal("already_exists", error!.Error);
+    }
+
+    [Theory]
+    [InlineData("/api/folders/projects/..%5coutside?failIfExists=true")]
+    [InlineData("/api/folders/projects/bad%7Cname?failIfExists=true")]
+    public async Task CreateFolder_FailIfExists_TraversalOrInvalidName_Returns400(string url)
+    {
+        await _client.PostAsync("/api/folders/projects", content: null);
+
+        var response = await _client.PostAsync(url, content: null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ErrorDto>(ResponseJsonOptions);
+        Assert.Equal("invalid_path", error!.Error);
+        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(_vaultRootPath)!, "outside")));
+    }
+
+    [Fact]
+    public async Task CreateFolder_FailIfExists_EncodedSlashTraversal_StaysInsideTheVault()
+    {
+        // ASP.NET Core keeps %2F encoded in route values, so this is a
+        // single (odd but harmless) segment name, never a traversal.
+        await _client.PostAsync("/api/folders/projects", content: null);
+
+        var response = await _client.PostAsync("/api/folders/projects/..%2F..%2Foutside?failIfExists=true", content: null);
+
+        Assert.Contains(response.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest });
+        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(_vaultRootPath)!, "outside")));
+        Assert.False(Directory.Exists(Path.Combine(_vaultRootPath, "outside")));
+    }
+
+    [Fact]
     public async Task MoveFolder_ExistingFolder_RenamesDirectoryAndReturnsNewPath()
     {
         WriteNoteToDisk("projects/idea.md", "# idea");
