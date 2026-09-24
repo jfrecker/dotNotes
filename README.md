@@ -8,9 +8,10 @@ vault directory on disk. Features a split-pane editor with live
 preview (Mermaid diagrams, LaTeX math, syntax highlighting),
 `[[wikilinks]]` with backlinks and a graph view, full-text search,
 image/audio/video/PDF embedding, token-protected shareable read-only
-links with QR codes, and an in-process MCP server so an AI assistant
+links with QR codes, a Kanban task board (tasks are notes too) with a
+Pomodoro timer, and an in-process MCP server so an AI assistant
 (Claude Desktop, Claude Code, Cursor) can search and edit your notes
-directly.
+and tasks directly.
 
 ## Quick start
 
@@ -249,6 +250,92 @@ older than 4.7, or no compose provider is installed. Install
 host path not existing yet — Quadlet does not create it:
 `mkdir -p ~/dotnotes/vault`.
 
+## Tasks & Kanban
+
+A task is just a note with YAML frontmatter, in the same format as
+[Backlog.md](https://github.com/MrLesk/Backlog.md), so it stays a
+plain, hand-editable `.md` file you can open in the normal editor:
+
+```markdown
+---
+id: TASK-12
+title: Fix login redirect
+status: In Progress
+assignee:
+  - '@me'
+created_date: '2026-09-24 10:30'
+labels:
+  - auth
+priority: high
+ordinal: 2000
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Users land on / instead of the page they asked for.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Redirect preserves the original path
+<!-- AC:END -->
+```
+
+- **Where they live:** new tasks go in the `tasks/` folder as
+  `TASK-12 - Fix login redirect.md`. Any note anywhere in the vault with
+  `id` and `status` in its frontmatter is recognised as a task.
+- **Sidebar → TASKS:** *Kanban Board* and *All Tasks*, with a count of
+  active tasks.
+- **Kanban Board:** one column per status. Drag cards between columns
+  or within a column; the order is saved in each file's `ordinal`.
+  Filter by text, label, assignee and priority. Click a card to edit
+  every field, including an interactive acceptance-criteria checklist
+  and the implementation plan and notes. *Open note* jumps to the raw
+  file.
+- **All Tasks:** a sortable, filterable table, with an option to show
+  archived tasks.
+- **Convert to task:** right-click any note in the sidebar. The note
+  gets task frontmatter and is renamed `TASK-N - <title>.md`, and links
+  to it are rewritten. Existing notes are never converted automatically.
+- **Renaming** a task (task panel or the editor's title field) renames
+  its file and rewrites incoming `[[wikilinks]]`. Editing `title:` by
+  hand in the YAML changes only the displayed title.
+- **Archive** moves the file to `tasks/archive/`. Task IDs are never
+  reused.
+- **Concurrent edits:** if a task (or any note) changes on disk while
+  it is open in the editor, e.g. from the board or an AI assistant, the
+  next autosave is refused and you choose *Reload latest* or keep your
+  version.
+- **Configuration** (`appsettings.json` → `Tasks`, or env vars):
+
+  | Setting | Default | Env var |
+  |---|---|---|
+  | `Folder` | `tasks` | `Tasks__Folder` |
+  | `IdPrefix` | `TASK` | `Tasks__IdPrefix` |
+  | `Statuses` | `To Do`, `In Progress`, `Done` | `Tasks__Statuses__0`, `Tasks__Statuses__1`, … |
+  | `DefaultStatus` | first status | `Tasks__DefaultStatus` |
+  | `Priorities` | `high`, `medium`, `low` | `Tasks__Priorities__0`, … |
+
+  `Statuses`/`Priorities` are deliberately absent from `appsettings.json`
+  (their defaults live in code), so setting them via env vars or an
+  override file defines the *whole* list, e.g.
+  `Tasks__Statuses__0=Backlog`, `Tasks__Statuses__1=Doing`,
+  `Tasks__Statuses__2=Review`, `Tasks__Statuses__3=Done`. The board's
+  columns follow that order.
+
+### Pomodoro timer
+
+The Kanban board has a Pomodoro timer at the top right. You can set the
+focus, short-break and long-break lengths and the number of cycles
+before a long break. It has start, pause, reset and skip controls, and
+can play a chime and/or show a browser notification when a phase ends.
+It can optionally be linked to a task. Settings and the running timer
+are kept in the browser's `localStorage`. The timer keeps running while
+you move around the app, and a compact countdown appears in the top bar
+when the board isn't visible. It runs entirely in the browser and never
+writes to your notes.
+
 ## Connecting an AI assistant via MCP
 
 Once the app is running locally (`dotnet run --project src/DotNotes.Api`,
@@ -269,14 +356,25 @@ extra port to expose. Point Claude Desktop
 
 The endpoint is gated on the `Mcp:Enabled` config flag (on by default,
 `appsettings.json` / `Mcp__Enabled` env var) — when disabled, `/mcp` is
-not mapped at all. See `docs/05-MCP-SPEC.md` for the full tool contract
-(`search_notes`, `get_note`, `create_note`, `update_note`,
-`get_backlinks`, `get_recent_notes`, `get_config`).
+not mapped at all. See `docs/05-MCP-SPEC.md` for the full tool contract.
+
+| Area | Tools |
+|---|---|
+| Notes | `search_notes`, `get_note`, `create_note`, `update_note`, `create_folder`, `move_note`, `move_folder`, `get_backlinks`, `get_recent_notes`, `get_config` |
+| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task` (fields, status, acceptance-criteria add/remove/check/uncheck, plan/notes set/append, final summary), `move_task` (status + position), `archive_task`, `get_board`, `search_tasks`, `get_task_workflow` |
+
+The resource `dotnotes://workflow/tasks` (also available from the
+`get_task_workflow` tool) tells an agent how to work with tasks:
+search before creating one, write tasks as self-contained work orders,
+record a plan before coding, check acceptance criteria only with
+evidence, and finish with a summary.
 
 ## Project structure
 
 ```
 CLAUDE.md                          # project rules & constraints for Claude Code
+Directory.Build.props              # release <Version> (single source of truth)
+NOTICE                             # third-party attribution (Backlog.md, MIT)
 DEPLOYMENT.md                      # full deployment guide
 docs/
   01-PROJECT-PLAN.md               # phased build order, tasks, exit criteria per phase
@@ -284,10 +382,11 @@ docs/
   03-FEATURE-SPEC.md               # feature checklist, MVP vs stretch (all Must-have items done)
   04-API-SPEC.md                   # REST contract
   05-MCP-SPEC.md                   # MCP server tool contract
-  06-DATA-MODEL.md                 # vault layout, wikilinks, indexes
+  06-DATA-MODEL.md                 # vault layout, wikilinks, indexes, task frontmatter
+  features/tasks-kanban/PLAN.md    # Tasks & Kanban design, feature inventory, decisions
 src/
   DotNotes.Api/                    # ASP.NET Core host: REST API, MCP endpoint, static frontend
-  DotNotes.Core/                   # framework-free domain library (notes, links, search, sharing, media)
+  DotNotes.Core/                   # framework-free domain library (notes, links, search, sharing, media, tasks)
 tests/                             # xUnit test projects (291 tests)
 deploy/
   podman/dotnotes.container        # Podman Quadlet unit (run as a systemd service)
@@ -303,6 +402,16 @@ contradicts it (see `CLAUDE.md`).
 - Targets **.NET 10 (LTS)**.
 - Deliberately **descopes multi-language UI and multi-user accounts** —
   see `docs/03-FEATURE-SPEC.md`'s "Explicitly descoped" section.
+- Version **0.2.0** — defined once in `Directory.Build.props`.
 - The MCP server uses the official `ModelContextProtocol` C# SDK
   (currently pre-1.0, pinned at `2.2.0`) — `docs/05-MCP-SPEC.md` has the
   full tool contract.
+
+## Acknowledgements
+
+- [NoteDiscovery](https://github.com/gamosoft/NoteDiscovery) — the app
+  whose layout and feature set dotNotes replicates.
+- [Backlog.md](https://github.com/MrLesk/Backlog.md) (MIT, © 2025
+  Backlog.md) — its task file format, section markers, ordinal-based
+  board ordering and agent-workflow guidance are reimplemented here
+  (no code copied). See [`NOTICE`](NOTICE).

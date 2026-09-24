@@ -117,8 +117,24 @@
     }, SAVED_INDICATOR_CLEAR_MS);
   }
 
+  /**
+   * Renders the live preview - and, if the open note has task frontmatter
+   * (docs/features/tasks-kanban/PLAN.md §5's "Notes integration"), the
+   * compact task header above it instead of the raw YAML block. Notes
+   * without task frontmatter (including ones that merely *start* with
+   * `---`) render exactly as before - `Tasks.extractTaskFrontmatter`
+   * returns `null` for those.
+   */
   async function renderPreviewNow() {
-    await MarkdownView.render(previewEl, editorEl.value);
+    const content = editorEl.value;
+    const taskInfo = Tasks.extractTaskFrontmatter(content);
+    if (taskInfo) {
+      Tasks.renderTaskPreviewHeader(taskInfo);
+      await MarkdownView.render(previewEl, taskInfo.body);
+    } else {
+      Tasks.hideTaskPreviewHeader();
+      await MarkdownView.render(previewEl, content);
+    }
   }
 
   function schedulePreviewRender() {
@@ -126,25 +142,123 @@
     previewTimer = setTimeout(renderPreviewNow, PREVIEW_DEBOUNCE_MS);
   }
 
-  /** Saves the editor's current content for `currentPath`, if it differs from what was last persisted. */
-  async function saveCurrentNote() {
+  // Saves are serialised: an in-flight autosave PUT followed by a
+  // flushAutosave (blur/navigate) used to send a stale `expectedUpdatedAt`
+  // and produce a false 409. Every save runs on this chain, reads the
+  // *latest* `currentUpdatedAt` and editor content only when it actually
+  // starts, and is a no-op if there's nothing left to save.
+  let saveChain = Promise.resolve();
+  // True while a conflict prompt is unresolved - queued autosaves stay quiet
+  // instead of stacking a second dialog on top of the first.
+  let conflictPromptOpen = false;
+
+  /**
+   * Saves the editor's current content for `currentPath`, if it differs
+   * from what was last persisted. Sends `expectedUpdatedAt` (docs/features/
+   * tasks-kanban/PLAN.md §3/§4/§5) so a concurrent edit from the Kanban
+   * board/modal or MCP is detected instead of silently overwritten; a 409
+   * `conflict` response pauses autosave and asks the user how to resolve it
+   * (see handleSaveConflict). The prompt runs *outside* the save chain so
+   * resolving it (which may reload the note or save again) can't deadlock.
+   */
+  async function saveCurrentNote(options = {}) {
+    const run = saveChain.then(() => performSave(options));
+    saveChain = run.then(() => undefined, () => undefined);
+    const outcome = await run;
+    if (outcome?.conflict) {
+      await handleSaveConflict(outcome);
+    }
+  }
+
+  /** One save attempt. Returns `{ conflict: 'stale' | 'gone', path }` on a 409, else `null`. */
+  async function performSave(options) {
     if (!currentPath || !isDirty()) {
-      return;
+      return null;
+    }
+    if (conflictPromptOpen && !options.force) {
+      return null;
     }
     const contentToSave = editorEl.value;
+    const savingPath = currentPath;
     setSaveStatus('Saving…', null);
     try {
-      const result = await Api.saveNote(currentPath, contentToSave);
-      lastSavedContent = contentToSave;
-      // Keep the header's "Edited <date>" label in sync with every save,
-      // not just the initial load (docs/03-FEATURE-SPEC.md's note editor
-      // header) - `PUT /api/notes/{path}` returns the fresh `updatedAt`.
-      currentUpdatedAt = result?.updatedAt || currentUpdatedAt;
-      renderEditedLabel();
+      const result = await Api.saveNote(
+        savingPath,
+        contentToSave,
+        options.force ? null : currentUpdatedAt,
+      );
+      if (currentPath === savingPath) {
+        lastSavedContent = contentToSave;
+        // Keep the header's "Edited <date>" label in sync with every save,
+        // not just the initial load (docs/03-FEATURE-SPEC.md's note editor
+        // header) - `PUT /api/notes/{path}` returns the fresh `updatedAt`.
+        currentUpdatedAt = result?.updatedAt || currentUpdatedAt;
+        renderEditedLabel();
+      }
       setSaveStatus('Saved', 'success');
       scheduleSavedIndicatorClear();
     } catch (err) {
+      if (err.status === 409 && currentPath === savingPath) {
+        clearTimeout(autosaveTimer);
+        autosaveTimer = null;
+        setSaveStatus('Not saved - changed elsewhere', 'error');
+        // A 409 with no `currentUpdatedAt` means the file is gone from this
+        // path (moved/deleted), not that its content changed.
+        return { conflict: err.body?.currentUpdatedAt ? 'stale' : 'gone', path: savingPath };
+      }
       setSaveStatus(`Error saving: ${err.message}`, 'error');
+    }
+    return null;
+  }
+
+  async function handleSaveConflict({ conflict, path }) {
+    if (conflictPromptOpen) {
+      return;
+    }
+    conflictPromptOpen = true;
+    try {
+      if (conflict === 'gone') {
+        // Never offer to "overwrite" here - that would silently recreate
+        // the note at its old path after it was moved/renamed/deleted.
+        const closeNote = await Modal.confirm({
+          title: 'This note was moved or deleted elsewhere',
+          description:
+            'The note no longer exists at this path (it was renamed, moved, archived or deleted from the Kanban board, an AI assistant, or another tab), so your latest edits could not be saved. Close the note, or keep this editor open to copy your text out first.',
+          confirmLabel: 'Close note',
+          cancelLabel: 'Keep editing',
+          danger: true,
+        });
+        if (currentPath !== path) {
+          return;
+        }
+        if (closeNote) {
+          lastSavedContent = editorEl.value; // discard: there is nowhere to save it
+          await loadTree();
+          await navigateHome('');
+        }
+        return;
+      }
+
+      const reload = await Modal.confirm({
+        title: 'This note changed elsewhere',
+        description:
+          'Someone/something else (the Kanban board, an AI assistant, or another tab) saved a newer version of this note. Reload the latest version, or keep yours and overwrite it with your local changes?',
+        confirmLabel: 'Reload latest',
+        cancelLabel: 'Keep mine (overwrite)',
+        danger: false,
+      });
+      if (!currentPath || currentPath !== path) {
+        return; // navigated away while the confirm dialog was open
+      }
+      conflictPromptOpen = false;
+      if (reload) {
+        lastSavedContent = editorEl.value; // discard local edits so the reload isn't itself blocked by a dirty check
+        await selectFile(path);
+      } else {
+        await saveCurrentNote({ force: true });
+      }
+    } finally {
+      conflictPromptOpen = false;
     }
   }
 
@@ -190,7 +304,13 @@
     }
   }
 
-  async function selectFile(path) {
+  /**
+   * Opens `path` in the editor. `keepView: true` loads it into the (hidden)
+   * editor without switching away from the Kanban board/list - used when a
+   * task-file change (rename/archive/convert) means the editor's file moved
+   * while a task view is showing.
+   */
+  async function selectFile(path, { keepView = false } = {}) {
     // Don't lose in-flight edits to the note we're navigating away from.
     await flushAutosave();
     clearTimeout(previewTimer);
@@ -207,8 +327,11 @@
       editorEl.disabled = false;
       noteTitleInputEl.value = WikiLinks.getBareTitle(currentPath);
       renderEditedLabel();
-      homeViewEl.classList.add('hidden');
-      noteEditorViewEl.classList.remove('hidden');
+      if (!keepView) {
+        Tasks.hide();
+        homeViewEl.classList.add('hidden');
+        noteEditorViewEl.classList.remove('hidden');
+      }
       Tree.setSelected(fileTreeEl, currentPath);
       updatePrevNextButtons();
       setSaveStatus('', null);
@@ -221,6 +344,30 @@
     } catch (err) {
       setSaveStatus(`Error loading note: ${err.message}`, 'error');
     }
+  }
+
+  /**
+   * Called by js/tasks.js around a task-file change (convert / rename /
+   * archive / modal save). Before the change, flush the editor if it has
+   * this file open so no edit is lost; after it, reload the editor onto
+   * `newPath` (the same path when only the content changed) so it never sits
+   * on a dead path or stale `updatedAt`.
+   */
+  async function prepareNoteChange(path) {
+    if (path && currentPath === path) {
+      await flushAutosave();
+    }
+  }
+
+  async function followNoteChange(oldPath, newPath) {
+    if (!oldPath || !newPath || currentPath !== oldPath) {
+      return;
+    }
+    const editorVisible = !noteEditorViewEl.classList.contains('hidden');
+    // Detach from the old path first so selectFile's own flush can't try to
+    // PUT to a path that no longer exists (it was flushed by prepareNoteChange).
+    currentPath = null;
+    await selectFile(newPath, { keepView: !editorVisible });
   }
 
   /**
@@ -242,6 +389,7 @@
       Tree.setSelected(fileTreeEl, null);
     }
     currentBrowseFolder = folderPath || '';
+    Tasks.hide();
     noteEditorViewEl.classList.add('hidden');
     homeViewEl.classList.remove('hidden');
     renderHomeView();
@@ -793,7 +941,7 @@
       return !renameModalFieldEl.classList.contains('hidden');
     }
 
-    function open({ title, description, showInput, label, initialValue, confirmLabel, danger, validate }) {
+    function open({ title, description, showInput, label, initialValue, confirmLabel, cancelLabel, danger, validate }) {
       renameModalTitleEl.textContent = title;
       renameModalDescriptionEl.textContent = description || '';
       renameModalDescriptionEl.classList.toggle('hidden', !description);
@@ -802,6 +950,7 @@
       renameModalInputEl.value = initialValue || '';
       renameModalErrorEl.classList.add('hidden');
       renameModalConfirmBtn.textContent = confirmLabel || 'OK';
+      renameModalCancelBtn.textContent = cancelLabel || 'Cancel';
       renameModalConfirmBtn.classList.toggle('mini-modal-btn-danger', !!danger);
       validateFn = validate || null;
       renameModalEl.classList.remove('hidden');
@@ -859,6 +1008,7 @@
         handleConfirm();
       } else if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation(); // never also close a modal underneath (e.g. the task modal)
         handleCancel();
       }
     });
@@ -867,17 +1017,26 @@
     renameModalEl.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !isPromptMode()) {
         event.preventDefault();
+        event.stopPropagation();
         handleCancel();
       }
     });
 
     return {
+      isOpen: () => !renameModalEl.classList.contains('hidden'),
       /** Resolves to the validated string, or `null` if cancelled. `validate(raw) => { ok: true, value } | { ok: false, message }`. */
       prompt: (opts) => open({ ...opts, showInput: true, confirmLabel: opts.confirmLabel || 'OK' }),
       /** Resolves to `true`/`false`. */
       confirm: (opts) => open({ ...opts, showInput: false, confirmLabel: opts.confirmLabel || 'OK' }),
     };
   })();
+
+  // js/tasks.js (loaded before this file, but its own IIFE has no reach into
+  // app.js's closure) reuses this same themed modal for its Archive
+  // confirmation and the "note changed elsewhere" conflict prompt below,
+  // rather than a second confirm/prompt implementation - see this phase's
+  // task brief ("reuse Modal.confirm").
+  window.Modal = Modal;
 
   // --- rename (notes and folders) ------------------------------------------
 
@@ -1002,18 +1161,35 @@
     }
   }
 
+  const ICON_CONVERT_TO_TASK =
+    '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />' +
+    '</svg>';
+
   function handleTreeContextMenu(entry, x, y, anchorEl) {
+    const items = [
+      { id: 'tree-context-rename', label: 'Rename', icon: ICON_RENAME, onSelect: () => openRenameModal(entry) },
+      { id: 'tree-context-move-to', label: 'Move to…', icon: ICON_MOVE_TO, onSelect: () => openMoveToMenu(entry, anchorEl) },
+    ];
+    // "Convert to task" (docs/features/tasks-kanban/PLAN.md §5's "Notes
+    // integration") - notes only, and not for a note that's already a task.
+    if (entry.type === 'file' && !Tasks.isTaskPath(entry.path)) {
+      items.push({
+        id: 'tree-context-convert-to-task',
+        label: 'Convert to task',
+        icon: ICON_CONVERT_TO_TASK,
+        onSelect: () => Tasks.convertNote(entry.path),
+      });
+    }
+    items.push({ id: 'tree-context-delete', label: 'Delete', icon: ICON_DELETE, danger: true, onSelect: () => deleteEntry(entry) });
+
     Menu.open({
       x,
       y,
       id: 'tree-context-menu',
       ariaLabel: `Actions for "${entry.name}"`,
       returnFocusEl: anchorEl,
-      items: [
-        { id: 'tree-context-rename', label: 'Rename', icon: ICON_RENAME, onSelect: () => openRenameModal(entry) },
-        { id: 'tree-context-move-to', label: 'Move to…', icon: ICON_MOVE_TO, onSelect: () => openMoveToMenu(entry, anchorEl) },
-        { id: 'tree-context-delete', label: 'Delete', icon: ICON_DELETE, danger: true, onSelect: () => deleteEntry(entry) },
-      ],
+      items,
     });
   }
 
@@ -1154,10 +1330,25 @@
     if (!validated.ok) {
       window.alert(validated.message);
     } else if (validated.name !== currentTitle) {
-      const entry = { path: currentPath, name: currentPath.slice(currentPath.lastIndexOf('/') + 1), type: 'file' };
-      const parent = parentFolderOf(currentPath);
-      const destinationPath = parent ? `${parent}/${validated.name}.md` : `${validated.name}.md`;
-      await performMove(entry, destinationPath);
+      // A task note's title lives in its frontmatter too, so renaming it
+      // has to go through the task API (docs/features/tasks-kanban/PLAN.md
+      // §5) rather than the plain move/rename flow - it renames the file
+      // *and* rewrites `title:`, keeping both in sync.
+      if (Tasks.isTaskPath(currentPath)) {
+        try {
+          await flushAutosave();
+          const result = await Tasks.renameTaskTitle(currentPath, validated.name);
+          await loadTree();
+          await selectFile(result.path);
+        } catch (err) {
+          window.alert(`Could not rename this task: ${err.message}`);
+        }
+      } else {
+        const entry = { path: currentPath, name: currentPath.slice(currentPath.lastIndexOf('/') + 1), type: 'file' };
+        const parent = parentFolderOf(currentPath);
+        const destinationPath = parent ? `${parent}/${validated.name}.md` : `${validated.name}.md`;
+        await performMove(entry, destinationPath);
+      }
     }
     // Whichever branch above ran (renamed, rejected, or a no-op),
     // re-sync the input with whatever `currentPath` actually is now -
@@ -1851,6 +2042,25 @@
   // navigation between two static pages, rather than a client-side
   // router, per CLAUDE.md's "no framework" rule).
   const requestedNotePath = new URLSearchParams(window.location.search).get('note');
+  // Optional deep links for the Tasks & Kanban views (docs/features/tasks-
+  // kanban/PLAN.md §5): `?view=board` opens the Kanban board, `?view=tasks`
+  // opens the All Tasks list, and `?task=TASK-1` (with either, or alone -
+  // implies the board) opens that task's modal once the view is showing.
+  const requestedView = new URLSearchParams(window.location.search).get('view');
+  const requestedTaskId = new URLSearchParams(window.location.search).get('task');
+
+  Tasks.init({ onOpenNote: selectFile, onTreeReload: loadTree, prepareNoteChange, followNoteChange }).then(async () => {
+    if (requestedView === 'board' || (!requestedView && requestedTaskId)) {
+      await Tasks.showBoard();
+    } else if (requestedView === 'tasks') {
+      await Tasks.showList();
+    } else {
+      return;
+    }
+    if (requestedTaskId) {
+      await Tasks.openTaskById(requestedTaskId);
+    }
+  });
 
   // The initial graph fetch races with the user picking a note from the
   // tree; until it resolves, wikilinks.js optimistically treats every

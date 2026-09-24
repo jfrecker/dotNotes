@@ -26,6 +26,10 @@ WORKDIR /src
 # Copy just the two shipped projects' csproj files first (not the test
 # projects - they aren't part of the published app) so `dotnet restore`
 # layer-caches across rebuilds that only change application code.
+# Directory.Build.props carries the release <Version> (single source of
+# truth); it must be present before restore/publish so the published
+# assembly reports the right version from GET /api/config.
+COPY Directory.Build.props ./
 COPY src/DotNotes.Api/DotNotes.Api.csproj src/DotNotes.Api/
 COPY src/DotNotes.Core/DotNotes.Core.csproj src/DotNotes.Core/
 
@@ -45,6 +49,11 @@ RUN dotnet publish src/DotNotes.Api/DotNotes.Api.csproj \
 # ---- Runtime stage -----------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
+
+# Keep in sync with <Version> in Directory.Build.props.
+LABEL org.opencontainers.image.title="dotNotes" \
+      org.opencontainers.image.version="0.2.0" \
+      org.opencontainers.image.licenses="MIT"
 
 # The aspnet base image ships a low-privilege "app" user/group
 # (uid/gid 1654 as of the 10.0 image) for exactly this purpose,

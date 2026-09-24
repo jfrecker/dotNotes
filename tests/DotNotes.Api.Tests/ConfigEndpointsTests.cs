@@ -50,10 +50,13 @@ public sealed class ConfigEndpointsTests : IDisposable
 
         Assert.NotNull(config);
         Assert.Equal("dotNotes", config!.Name);
-        Assert.False(string.IsNullOrWhiteSpace(config.Version));
+        // Directory.Build.props (repo root) sets <Version>0.2.0</Version>,
+        // reported via AssemblyInformationalVersionAttribute - see AppInfo.GetConfig.
+        Assert.Equal("0.2.0", config.Version);
         Assert.True(config.Features.Sharing);
         Assert.True(config.Features.Mcp);
         Assert.True(config.Features.Graph);
+        Assert.True(config.Features.Tasks);
         // Keep in sync with wwwroot/js/app.js's AUTOSAVE_DEBOUNCE_MS constant.
         Assert.Equal(1500, config.AutosaveDelayMs);
     }
@@ -95,5 +98,5 @@ public sealed class ConfigEndpointsTests : IDisposable
 
     private sealed record AppConfigDto(string Name, string Version, AppConfigFeaturesDto Features, int AutosaveDelayMs);
 
-    private sealed record AppConfigFeaturesDto(bool Sharing, bool Mcp, bool Graph);
+    private sealed record AppConfigFeaturesDto(bool Sharing, bool Mcp, bool Graph, bool Tasks);
 }

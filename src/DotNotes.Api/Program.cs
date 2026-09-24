@@ -7,6 +7,7 @@ using DotNotes.Core.Notes;
 using DotNotes.Core.Reorganization;
 using DotNotes.Core.Search;
 using DotNotes.Core.Sharing;
+using DotNotes.Core.Tasks;
 using DotNotes.Core.Vault;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,33 @@ builder.Services
 builder.Services
     .AddOptions<McpOptions>()
     .Bind(builder.Configuration.GetSection(McpOptions.SectionName));
+// TasksOptions.Statuses/Priorities ship with non-empty C# defaults (so
+// code that constructs TasksOptions directly, e.g. DotNotes.Core.Tests,
+// gets sensible values without any config) - but ConfigurationBinder
+// appends configured array values to an already-populated List<T>
+// rather than replacing it (a well-known binder gotcha), which would
+// otherwise silently duplicate every configured status/priority after
+// the C# defaults (e.g. 6 statuses instead of 3) any time appsettings.json
+// or an environment variable actually configures either list. Clearing
+// each list first - but only when the section genuinely configures it -
+// makes a configured list *replace* the default, while an unconfigured
+// one still falls back to the default untouched.
+var tasksSection = builder.Configuration.GetSection(TasksOptions.SectionName);
+builder.Services
+    .AddOptions<TasksOptions>()
+    .Configure(options =>
+    {
+        if (tasksSection.GetSection(nameof(TasksOptions.Statuses)).Exists())
+        {
+            options.Statuses.Clear();
+        }
+
+        if (tasksSection.GetSection(nameof(TasksOptions.Priorities)).Exists())
+        {
+            options.Priorities.Clear();
+        }
+    })
+    .Bind(tasksSection);
 
 // Resolve and validate the configured vault root path, creating it if it
 // doesn't exist yet, *before* the host is built. This is the Phase 0
@@ -112,8 +140,15 @@ builder.Services.AddSingleton<ISearchIndex, InMemorySearchIndex>();
 // VaultWatcherService's remarks for why this replaced Phase 3's
 // ILinkIndex-only wiring, and for how the initial full-vault scan avoids
 // reading every file twice across the two indexes.
+// Phase 12: task index (docs/features/tasks-kanban/PLAN.md §2). Same
+// singleton derived-cache shape as ILinkIndex/ISearchIndex above, and
+// forwarded as IVaultChangeListener the same way so VaultWatcherService's
+// (and VaultReorganizationService's) single fan-out pass keeps it live too.
+builder.Services.AddSingleton<ITaskIndex, InMemoryTaskIndex>();
+
 builder.Services.AddSingleton<IVaultChangeListener>(sp => sp.GetRequiredService<ILinkIndex>());
 builder.Services.AddSingleton<IVaultChangeListener>(sp => sp.GetRequiredService<ISearchIndex>());
+builder.Services.AddSingleton<IVaultChangeListener>(sp => sp.GetRequiredService<ITaskIndex>());
 
 // VaultWatcherService itself performs the initial full-vault scan during
 // its StartAsync, before the host reports "started", then keeps every
@@ -133,6 +168,12 @@ builder.Services.AddHostedService<VaultWatcherService>();
 // serialization per request.
 builder.Services.AddSingleton<IVaultReorganizationService, VaultReorganizationService>();
 
+// Phase 12: task read-modify-write service (docs/features/tasks-kanban/PLAN.md
+// §3), layered on top of INoteRepository/IVaultReorganizationService/ITaskIndex
+// above. Serializes its own writes internally (a SemaphoreSlim), so a
+// singleton lifetime is safe, same shape as IVaultReorganizationService.
+builder.Services.AddSingleton<ITaskService, TaskService>();
+
 // Phase 5: share-token store (docs/06-DATA-MODEL.md's "Share tokens"
 // section) and media store (uploaded binary assets under _media/).
 // Both have no mutable state beyond the resolved vault root path (their
@@ -150,7 +191,12 @@ builder.Services.AddSingleton<IMediaStore, FileSystemMediaStore>();
 builder.Services
     .AddMcpServer()
     .WithHttpTransport()
-    .WithTools<DotNotesMcpTools>();
+    .WithTools<DotNotesMcpTools>()
+    // Tasks & Kanban (docs/features/tasks-kanban/PLAN.md §6): a separate
+    // McpServerToolType/resource type so the feature stays independently
+    // registerable/testable from the notes-only tools above.
+    .WithTools<DotNotesTaskMcpTools>()
+    .WithResources<DotNotesTaskWorkflowResource>();
 
 // Cross-cutting concerns.
 builder.Services.AddProblemDetails();
@@ -214,6 +260,10 @@ app.MapMediaEndpoints();
 // its field-sourcing logic with the MCP get_config tool via AppInfo, so
 // the two can never drift apart.
 app.MapConfigEndpoints();
+
+// Phase 12: Tasks & Kanban REST endpoints (docs/04-API-SPEC.md's Tasks
+// section / docs/features/tasks-kanban/PLAN.md §4).
+app.MapTasksEndpoints();
 
 // Phase 6: MCP server (docs/05-MCP-SPEC.md), gated on Mcp:Enabled - same
 // "disabled means the route doesn't exist at all" shape as Sharing's own

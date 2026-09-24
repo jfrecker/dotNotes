@@ -37,9 +37,97 @@ const Api = (() => {
       .join('/');
   }
 
+  // Query-string builder shared by the Tasks endpoints below
+  // (docs/features/tasks-kanban/PLAN.md §4) - every filter is optional and
+  // simply omitted when falsy/absent, matching the API's own "all filters
+  // optional" contract.
+  function buildTaskQuery(filters) {
+    const params = new URLSearchParams();
+    for (const key of ['status', 'label', 'assignee', 'priority', 'milestone', 'q']) {
+      const value = filters?.[key];
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    if (filters?.includeArchived) {
+      params.set('includeArchived', 'true');
+    }
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+  }
+
   return {
     getTree() {
       return request('/api/notes');
+    },
+    // `/api/config` (docs/features/tasks-kanban/PLAN.md §10):
+    // `{ name, version, features, autosaveDelayMs }`.
+    getConfig() {
+      return request('/api/config');
+    },
+    // --- Tasks & Kanban (docs/features/tasks-kanban/PLAN.md §4) -----------
+    getTaskConfig() {
+      return request('/api/tasks/config');
+    },
+    listTasks(filters) {
+      return request(`/api/tasks${buildTaskQuery(filters)}`);
+    },
+    getTaskRevision() {
+      return request('/api/tasks/revision');
+    },
+    getBoard(filters) {
+      return request(`/api/tasks/board${buildTaskQuery(filters)}`);
+    },
+    getTask(id) {
+      return request(`/api/tasks/${encodeURIComponent(id)}`);
+    },
+    createTask(data) {
+      return request('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    },
+    // `TaskPatch`: only supplied fields change (docs/features/tasks-kanban/
+    // PLAN.md §4) - callers should only include fields that actually changed.
+    updateTask(id, patch) {
+      return request(`/api/tasks/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+    },
+    // `beforeId` (optional): insert immediately before that task in the
+    // target column's FULL order - preferred over `index` because `index`
+    // counts every task in the column, which a filtered board can't know.
+    // Servers that predate `beforeId` ignore the unknown field.
+    moveTask(id, status, index, beforeId) {
+      const body = { status };
+      if (index !== undefined && index !== null) {
+        body.index = index;
+      }
+      if (beforeId) {
+        body.beforeId = beforeId;
+      }
+      return request(`/api/tasks/${encodeURIComponent(id)}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    },
+    archiveTask(id) {
+      return request(`/api/tasks/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+    },
+    convertNoteToTask(path, status) {
+      const body = { path };
+      if (status) {
+        body.status = status;
+      }
+      return request('/api/tasks/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
     },
     // `includeBacklinks` maps to the `?includeBacklinks=true` query param
     // documented in docs/04-API-SPEC.md's "Links & graph" section; when
@@ -48,11 +136,20 @@ const Api = (() => {
       const query = includeBacklinks ? '?includeBacklinks=true' : '';
       return request(`/api/notes/${encodePath(path)}${query}`);
     },
-    saveNote(path, content) {
+    // `expectedUpdatedAt`, when given, enables optimistic-concurrency
+    // checking (docs/features/tasks-kanban/PLAN.md §3/§4): the server
+    // responds 409 `conflict` (with `currentUpdatedAt`) if the file's
+    // mtime has moved on since the caller last read it. Omitted entirely
+    // (not just falsy) keeps today's last-write-wins PUT behaviour.
+    saveNote(path, content, expectedUpdatedAt) {
+      const body = { content };
+      if (expectedUpdatedAt) {
+        body.expectedUpdatedAt = expectedUpdatedAt;
+      }
       return request(`/api/notes/${encodePath(path)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
       });
     },
     deleteNote(path) {

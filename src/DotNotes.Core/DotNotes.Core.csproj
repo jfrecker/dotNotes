@@ -31,6 +31,19 @@
     -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+
+    <!--
+      YamlDotNet (MIT, fully offline, no native/cloud dependency) is used by
+      DotNotes.Core.Tasks (Phase 12, docs/features/tasks-kanban/PLAN.md)
+      strictly to *parse* a task note's YAML frontmatter block into a
+      document object model we can walk field-by-field. Frontmatter is
+      *written* by our own small emitter (TaskMarkdown) so the on-disk
+      layout/quoting matches Backlog.md's serializer and diffs stay
+      minimal - YamlDotNet's own emitter is never used for output. This
+      keeps DotNotes.Core's "no database" and "framework-free, plain xUnit
+      testable" rules intact: YamlDotNet has zero ASP.NET Core dependency.
+    -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
 </Project>

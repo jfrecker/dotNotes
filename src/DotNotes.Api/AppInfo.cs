@@ -1,3 +1,4 @@
+using System.Reflection;
 using DotNotes.Core.Config;
 using Microsoft.Extensions.Options;
 
@@ -30,10 +31,21 @@ public static class AppInfo
 
     public static AppConfigResponse GetConfig(IOptions<SharingOptions> sharingOptions, IOptions<McpOptions> mcpOptions)
     {
-        // No <Version> is set in DotNotes.Api.csproj, so this falls back to
-        // the SDK's implicit default AssemblyVersion (1.0.0.0) until the
-        // csproj is given an explicit <Version> down the line.
-        var version = typeof(AppInfo).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        // Directory.Build.props (repo root) sets <Version> (and disables
+        // the "+<git sha>" suffix), so the assembly's
+        // AssemblyInformationalVersionAttribute carries the real release
+        // version (e.g. "0.2.0") - unlike GetName().Version, which only
+        // ever reflects <AssemblyVersion>/<FileVersion> and would silently
+        // fall back to the SDK's implicit 1.0.0.0 default whenever those
+        // aren't set. The '+' strip is defensive: nothing sets
+        // IncludeSourceRevisionInInformationalVersion=true today, but this
+        // keeps a stray "+<sha>"/"+<metadata>" suffix from ever leaking
+        // into a public API response if that ever changes.
+        var informationalVersion = typeof(AppInfo).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var version = string.IsNullOrWhiteSpace(informationalVersion)
+            ? "0.0.0"
+            : informationalVersion.Split('+', 2)[0];
 
         return new AppConfigResponse(
             Name,
@@ -44,7 +56,12 @@ public static class AppInfo
                 // Always on since Phase 3 - no feature flag exists for the
                 // graph/backlinks functionality itself (only sharing and
                 // MCP are independently toggleable), per this phase's brief.
-                Graph: true),
+                Graph: true,
+                // Always on since Phase 12 (Tasks & Kanban) - like Graph
+                // above, there is no independent enable/disable toggle for
+                // this feature; statuses/prefix/folder are configurable,
+                // but the feature itself always exists.
+                Tasks: true),
             AutosaveDelayMs);
     }
 }
@@ -53,4 +70,4 @@ public static class AppInfo
 public sealed record AppConfigResponse(string Name, string Version, AppConfigFeatures Features, int AutosaveDelayMs);
 
 /// <summary>The <c>features</c> object of <see cref="AppConfigResponse"/>.</summary>
-public sealed record AppConfigFeatures(bool Sharing, bool Mcp, bool Graph);
+public sealed record AppConfigFeatures(bool Sharing, bool Mcp, bool Graph, bool Tasks);

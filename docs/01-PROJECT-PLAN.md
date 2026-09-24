@@ -420,6 +420,33 @@ verification).
 
 ---
 
+## Phase 12 — Tasks & Kanban (v0.2.0)
+
+**Goal:** a task tracker inside the vault, ported from Backlog.md's
+file format: a task is a note with YAML frontmatter (`id`, `status`, …),
+shown on a Kanban board and an All Tasks list, editable from a task
+panel or the normal editor, and driveable by AI assistants over MCP.
+Plus a client-side Pomodoro timer on the board. Full design, feature
+inventory and every autonomous judgement call:
+`docs/features/tasks-kanban/PLAN.md`.
+
+**Exit criteria**
+- [x] Task notes parse/serialize byte-stably with Backlog.md-compatible
+      frontmatter and section markers; plain notes are unaffected.
+- [x] `/api/tasks*` endpoints and the task MCP tools + workflow resource
+      match `docs/04-API-SPEC.md` / `docs/05-MCP-SPEC.md`.
+- [x] Sidebar TASKS section, Kanban board with persisted drag-and-drop
+      ordering, task modal with AC checklist, All Tasks list, Pomodoro.
+- [x] Note editor detects concurrent edits (409 on stale save).
+- [x] Version 0.2.0; `dotnet test` green with zero warnings.
+
+**Delegate to:** `backend-architect` (Core tasks domain, index,
+service) → `api-developer` + `mcp-server-engineer` (in parallel);
+`frontend-integrator` (UI, in parallel with the backend, against the
+plan's contract) → `qa-test-engineer` (tests, parity, review).
+
+---
+
 ## When to delegate — quick reference
 
 | Concern | Subagent |

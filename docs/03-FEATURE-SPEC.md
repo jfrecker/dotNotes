@@ -42,6 +42,30 @@ during Phase 8 (or as each phase completes them).
 - [ ] Drawing/sketch tool saved as PNG alongside notes
 - [x] Light/dark theme toggle in the top nav
 
+## Tasks & Kanban (Phase 12)
+
+Design and decisions: `docs/features/tasks-kanban/PLAN.md`. Ticked only
+after being exercised end to end (xUnit against a real temp vault, and/or
+the Playwright suite in `tests/e2e/specs/tasks-kanban.spec.js`); leftovers
+are in `docs/KNOWN-ISSUES.md`.
+
+- [x] A task is a plain `.md` note recognised by YAML frontmatter (`id` + `status`) anywhere in the vault; Backlog.md-compatible frontmatter and section markers, unknown keys preserved, byte-stable re-serialisation, CRLF/BOM tolerated; notes without task frontmatter behave exactly as before
+- [x] Sidebar `TASKS` section above "Folders & Notes" with "All Tasks" and "Kanban Board" rows, each with the active-task count
+- [x] Kanban board: one column per configured status (`Tasks:Statuses`, env-overridable) with count badges; a task with an unconfigured status gets its own extra column
+- [x] Cards show title, id, description excerpt, assignee, labels, priority, AC progress and created date; card click opens the task modal
+- [x] Drag-and-drop between columns and reordering within a column, persisted to the files (ordinal), including while a filter hides some cards
+- [x] "+ New Task" (board header, list view and per-column "+" with the column's status preset) with title validation
+- [x] Task modal: edit title, status, priority, assignee, labels, milestone, dependencies, description, plan/notes/final summary and an interactive acceptance-criteria checklist (add/edit/tick/remove); "Open note" link; Archive with confirmation
+- [x] Board filters (text, label, assignee, priority) and an All Tasks table that is sortable (numeric-aware ID sort) and filterable (text, status, label, assignee, priority, show archived)
+- [x] Live refresh: the board/list pick up API, MCP and direct-file edits without a reload (revision polling + file watcher)
+- [x] Pomodoro timer at the top right of the Kanban view: adjustable focus/short/long durations and cycles-before-long-break, start/pause/reset/skip, visible countdown + phase + cycle dots, chime and/or browser notification on phase change, settings persisted, keeps running across in-app navigation and reloads (top-nav indicator while the board is hidden), optional linked task
+- [x] Light and dark styling for the board, modal and Pomodoro widget
+- [x] "Convert to task" in the sidebar context menu (no auto-migration of existing notes); renaming a task's title from the modal, the API or the editor's inline title renames the file and rewrites incoming wikilinks; task note preview hides the YAML and shows a task header
+- [x] Concurrent-edit handling: the note editor sends `expectedUpdatedAt` and offers Reload latest / Overwrite on a 409; board edits are field-level patches that merge with whatever was saved elsewhere
+- [x] REST `/api/tasks*` (config, list, board, revision, get, create, patch, move, archive, convert) with 400/404/409/503 error cases
+- [x] MCP tools `list_tasks`, `get_task`, `create_task`, `update_task` (incl. AC check/uncheck/add/remove, plan/notes), `move_task`, `archive_task`, `get_board`, `search_tasks`, `get_task_workflow` plus the `dotnotes://workflow/tasks` resource, verified over the real `/mcp` HTTP transport; existing MCP tools unchanged
+- [ ] Subtasks, milestone entities, dependency cycle/readiness checks, multi-select move, Definition-of-Done/Comments editing (fields and sections are preserved on round-trip, just not editable) — deliberately later, see the plan
+
 ## Present in the UI but deliberately not implemented
 
 These appear in the layout copied from NoteDiscovery so the structure

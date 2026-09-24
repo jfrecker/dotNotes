@@ -305,6 +305,11 @@ directly for anything not covered by `.env.example`.
 | `Server:Port` | `Server__Port` | `5175` | — | **Informational only** — reserved for future features that need to know the app's own port (e.g. building absolute share URLs). It does **not** control which port Kestrel actually binds to; that's `ASPNETCORE_URLS` (below). Changing this alone will not move the app to a different port. |
 | `Sharing:Enabled` | `Sharing__Enabled` | `true` | `SHARING_ENABLED` | Enables/disables the public, token-protected share-link endpoints entirely (not mapped at all when `false`). |
 | `Mcp:Enabled` | `Mcp__Enabled` | `true` | `MCP_ENABLED` | Enables/disables the `/mcp` endpoint entirely (not mapped at all when `false`). |
+| `Tasks:Folder` | `Tasks__Folder` | `tasks` | `TASKS_FOLDER` | Vault-relative folder new tasks are created in; archived tasks go to `<Folder>/archive/`. Any note with `id` + `status` frontmatter anywhere in the vault is a task regardless. |
+| `Tasks:IdPrefix` | `Tasks__IdPrefix` | `TASK` | `TASKS_ID_PREFIX` | Prefix for generated task ids (`TASK-12`). |
+| `Tasks:Statuses` | `Tasks__Statuses__0`, `__1`, … | `To Do`, `In Progress`, `Done` | — (add to `docker-compose.yml`'s `environment:`) | Board columns in order. A configured list replaces the default as a whole. The first entry is the default status unless `Tasks:DefaultStatus` is set. |
+| `Tasks:DefaultStatus` | `Tasks__DefaultStatus` | first status | — | Status given to new tasks when none is specified. |
+| `Tasks:Priorities` | `Tasks__Priorities__0`, … | `high`, `medium`, `low` | — | Allowed priority values. |
 | `Serilog:MinimumLevel:Default` | `Serilog__MinimumLevel__Default` | `Information` (`Debug` in the `Development` environment) | — | Baseline log verbosity, written to both console and a rolling daily file under `logs/` (14-day retention). |
 | `Serilog:MinimumLevel:Override:Microsoft.AspNetCore` | `Serilog__MinimumLevel__Override__Microsoft.AspNetCore` | `Warning` (`Information` in `Development`) | — | Quiets ASP.NET Core's own framework-level request logging separately from the app's own log level. |
 | `AllowedHosts` | `AllowedHosts` | `*` | — | Standard ASP.NET Core host-header filter. Irrelevant for a purely localhost/LAN setup; only matters if you put a reverse proxy in front with a specific hostname and want to restrict which `Host:` headers are accepted. |
